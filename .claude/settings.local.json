@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(curl -s http://localhost:3000/api/health)",
+      "Bash(curl:*)",
+      "WebSearch",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill:*)",
+      "Bash(lsof -i:3000)",
+      "Bash(pkill -9 node)",
+      "Bash(nohup node:*)",
+      "Bash(killall -9 node)",
+      "Bash(node /Users/tcd-1223489/Documents/cc-用户反馈页面/server.js)",
+      "Bash(pkill -9 -f \"node.*server.js\")",
+      "Read(//tmp/**)"
+    ]
+  }
+}
