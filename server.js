@@ -1,8 +1,6 @@
 /**
  * 用户反馈服务 - Node.js 后端
- * 提供 /api/submit 接口，将反馈数据写入飞书多维表格
- *
- * 使用 Node.js 内置 http 模块，无需额外依赖
+ * 使用 SQLite 本地存储反馈数据
  */
 
 const http = require('http');
@@ -10,44 +8,128 @@ const https = require('https');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+// ==================== 依赖检查 ====================
+let sqlite3, multer;
+try {
+  sqlite3 = require('sqlite3').verbose();
+} catch (e) {
+  console.error('请先安装 sqlite3: npm install sqlite3');
+  process.exit(1);
+}
+
+try {
+  multer = require('multer');
+} catch (e) {
+  console.error('请先安装 multer: npm install multer');
+  process.exit(1);
+}
 
 // ==================== 配置项 ====================
-// 请修改以下配置为你自己的飞书应用信息
 const CONFIG = {
-  // 飞书应用凭证
-  FEISHU_APP_ID: 'cli_a93438e196f85bc4',
-  FEISHU_APP_SECRET: 'pnbmT0e2YWBMuPXnw17AXeSlM8h7qZW5',
-
-  // 多维表格信息
-  FEISHU_APP_TOKEN: 'E0bxbqJLDa9g8CsnwmHcyLHjnPh',
-  FEISHU_TABLE_ID: 'tblYCxDTCaR8KSMT',
-
   // 服务端口号
-  PORT: 3000,
+  PORT: 3001,
 
-  // 飞书 API 地址
-  FEISHU_TOKEN_URL: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-  FEISHU_USER_TOKEN_URL: 'https://open.feishu.cn/open-apis/auth/v3/user_access_token/internal',
-  FEISHU_OAUTH_URL: 'https://open.feishu.cn/open-apis/authen/v1/index',
-  FEISHU_RECORD_URL: (appToken, tableId) =>
-    `https://open.feishu.cn/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records`,
+  // 管理后台密码
+  ADMIN_PASSWORD: 'admin123',
 
-  // 消息通知配置
-  // 接收通知的用户 open_id（登录飞书后会在控制台打印出来，复制到这里）
-  NOTIFICATION_USER_ID: 'ou_271831e3cb4c217421dc2dcb046724db',
+  // 数据目录
+  DATA_DIR: './data',
+  UPLOAD_DIR: './data/uploads',
 
-  // 多维表格访问链接（用于消息中点击跳转）
-  BITABLE_VIEW_URL: 'https://base.feishu.cn/base/E0bxbqJLDa9g8CsnwmHcyLHjnPh'
+  // ===== toca 登录配置 =====
+  TOCA_APP_KEY: 'cli_HTa80ODJzn9GJ2tVt',
+  TOCA_APP_SECRET: '44hJy469uvNKjrUwwFG2rcRoERzB5cF4',
+  TOCA_SPACE_ID: '0583d',
+
+  TOCA_REDIRECT_URI: 'http://localhost:3001/api/auth/callback',
+  TOCA_AGENT_ID: 'H0DCwsLcUaveHq8uL3',
+
+  TOCA_BASE_URL: 'http://toca.17u.cn',
+  TOCA_APP_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/app-token',
+  TOCA_SPACE_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/space-token',
+  TOCA_OAUTH_AUTHORIZE_URL: 'http://toca.17u.cn/oauth/authorize',
+  TOCA_GET_USER_BY_AUTH_CODE_URL: 'http://toca.17u.cn/open-api/oauth/getUserByAuthCode',
+  TOCA_REFRESH_USER_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/v2/user-token/refresh',
 };
 
-// 用户 Token 存储（生产环境应使用 Redis 或数据库）
-const userTokens = new Map();
+// toca Token 缓存
+const tocaTokens = {
+  appToken: null,
+  appTokenExpiresAt: 0,
+  spaceToken: null,
+  spaceTokenExpiresAt: 0,
+};
+
+// 用户 Session 存储
+const userSessions = new Map();
+const oauthStates = new Map();
+
+// 请求限流记录
+const rateLimitMap = new Map();
+
+// ==================== 数据库初始化 ====================
+const dbPath = path.join(CONFIG.DATA_DIR, 'feedback.db');
+let db;
+
+function initDatabase() {
+  // 创建数据目录
+  if (!fs.existsSync(CONFIG.DATA_DIR)) {
+    fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(CONFIG.UPLOAD_DIR)) {
+    fs.mkdirSync(CONFIG.UPLOAD_DIR, { recursive: true });
+  }
+
+  // 初始化数据库
+  db = new sqlite3.Database(dbPath);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      contact TEXT,
+      images TEXT,
+      device_info TEXT,
+      user_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  console.log(`[${formatDate()}] 数据库初始化完成: ${dbPath}`);
+}
+
+// ==================== Multer 配置 ====================
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, CONFIG.UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+    files: 3 // 最多3张
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('只允许上传 jpg/png 图片'));
+    }
+  }
+});
 
 // ==================== 工具函数 ====================
-
-/**
- * 发送 HTTP 请求
- */
 function request(options, data = null) {
   return new Promise((resolve, reject) => {
     const client = options.protocol === 'https:' ? https : http;
@@ -74,242 +156,35 @@ function request(options, data = null) {
   });
 }
 
-/**
- * 获取飞书 tenant_access_token
- */
-async function getFeishuToken() {
-  const response = await request({
-    method: 'POST',
-    protocol: 'https:',
-    hostname: 'open.feishu.cn',
-    path: '/open-apis/auth/v3/tenant_access_token/internal',
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  }, {
-    app_id: CONFIG.FEISHU_APP_ID,
-    app_secret: CONFIG.FEISHU_APP_SECRET
-  });
-
-  if (response.data.code !== 0) {
-    throw new Error(`获取飞书 Token 失败: ${response.data.msg || response.data.message}`);
-  }
-
-  return response.data.tenant_access_token;
+function generateUUID() {
+  return crypto.randomUUID();
 }
 
-/**
- * 写入飞书多维表格
- */
-
-/**
- * 使用授权码换取用户 user_access_token
- */
-async function getUserAccessToken(code) {
-  // 先获取 tenant_token
-  const tenantToken = await getFeishuToken();
-
-  const response = await request({
-    method: 'POST',
-    protocol: 'https:',
-    hostname: 'open.feishu.cn',
-    path: '/open-apis/authen/v1/oidc/access_token',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${tenantToken}`
-    }
-  }, {
-    grant_type: 'authorization_code',
-    code: code
-  });
-
-  console.log('获取用户 Token 响应:', JSON.stringify(response.data, null, 2));
-
-  if (response.data.code !== 0) {
-    throw new Error(`获取用户 Token 失败: ${response.data.msg || response.data.message}`);
-  }
-
-  const accessToken = response.data.data.access_token;
-  const refreshToken = response.data.data.refresh_token;
-  const expiresIn = response.data.data.expires_in;
-
-  // 用 access_token 获取用户信息
-  const userInfoResponse = await request({
-    method: 'GET',
-    protocol: 'https:',
-    hostname: 'open.feishu.cn',
-    path: '/open-apis/authen/v1/user_info',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`
-    }
-  });
-
-  console.log('获取用户信息响应:', JSON.stringify(userInfoResponse.data, null, 2));
-
-  let openId = 'user_' + Date.now(); // 备用ID
-  let userName = '未知用户';
-  let userAvatar = '';
-
-  if (userInfoResponse.data.code === 0 && userInfoResponse.data.data) {
-    const userData = userInfoResponse.data.data;
-    openId = userData.open_id || userData.union_id || openId;
-    userName = userData.name || userData.en_name || '未知用户';
-    userAvatar = userData.avatar_url || userData.avatar || '';
-  }
-
-  return {
-    accessToken: accessToken,
-    refreshToken: refreshToken,
-    expiresIn: expiresIn,
-    openId: openId,
-    userName: userName,
-    userAvatar: userAvatar
-  };
-}
-
-/**
- * 使用用户 Token 写入飞书多维表格
- */
-async function writeToFeishu(userToken, record) {
-  const url = CONFIG.FEISHU_RECORD_URL(CONFIG.FEISHU_APP_TOKEN, CONFIG.FEISHU_TABLE_ID);
-
-  const parsedUrl = new URL(url);
-
-  const response = await request({
-    method: 'POST',
-    protocol: parsedUrl.protocol,
-    hostname: parsedUrl.hostname,
-    path: parsedUrl.pathname + parsedUrl.search,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${userToken}`
-    }
-  }, {
-    fields: record
-  });
-
-  console.log('飞书 API 响应:', JSON.stringify(response.data, null, 2));
-
-  if (response.data.code !== 0) {
-    const errorMsg = response.data.msg || response.data.message || JSON.stringify(response.data);
-    throw new Error(`写入飞书表格失败: ${errorMsg}`);
-  }
-
-  return response.data;
-}
-
-/**
- * 发送飞书应用消息通知
- */
-async function sendNotification(userName, type, description, contact) {
-  // 如果没有配置接收者，则不发送通知
-  if (!CONFIG.NOTIFICATION_USER_ID) {
-    console.log(`[${formatDate()}] 未配置消息接收者，跳过通知`);
-    return;
-  }
-
-  try {
-    // 获取 tenant_access_token（应用身份）
-    const tenantToken = await getFeishuToken();
-
-    // 构建消息内容（使用普通文本消息，更可靠）
-    let messageText = `📢 新用户反馈通知\n\n`;
-    messageText += `👤 反馈用户：${userName || '匿名用户'}\n`;
-    messageText += `📋 问题类型：${type}\n`;
-    messageText += `📝 问题描述：${description.length > 100 ? description.substring(0, 100) + '...' : description}\n`;
-    if (contact) {
-      messageText += `📞 联系方式：${contact}\n`;
-    }
-    messageText += `\n📊 查看多维表格：${CONFIG.BITABLE_VIEW_URL}`;
-
-    const response = await request({
-      method: 'POST',
-      protocol: 'https:',
-      hostname: 'open.feishu.cn',
-      path: '/open-apis/im/v1/messages?receive_id_type=open_id',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${tenantToken}`
-      }
-    }, {
-      receive_id: CONFIG.NOTIFICATION_USER_ID,
-      msg_type: 'text',
-      content: JSON.stringify({ text: messageText })
-    });
-
-    console.log('消息推送响应:', JSON.stringify(response.data, null, 2));
-
-    if (response.data.code !== 0) {
-      console.error(`[${formatDate()}] 发送通知失败:`, response.data.msg || response.data.message);
-    } else {
-      console.log(`[${formatDate()}] 消息通知发送成功`);
-    }
-  } catch (error) {
-    console.error(`[${formatDate()}] 发送通知出错:`, error.message);
-  }
-}
-
-/**
- * 格式化日期
- */
 function formatDate(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
          `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-/**
- * 解析请求体
- */
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (e) {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-/**
- * 设置 CORS 响应头
- */
 function setCORS(res, allowedOrigin = '*') {
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Admin-Password');
 }
 
-/**
- * 发送 JSON 响应
- */
 function sendJSON(res, statusCode, data) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
 
-/**
- * 发送错误响应
- */
 function sendError(res, message, statusCode = 500) {
   sendJSON(res, statusCode, { success: false, message });
 }
 
-/**
- * 发送成功响应
- */
 function sendSuccess(res, data = {}) {
   sendJSON(res, 200, { success: true, ...data });
 }
 
-/**
- * 获取 MIME 类型
- */
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const mimeTypes = {
@@ -319,6 +194,7 @@ function getMimeType(filePath) {
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
     '.svg': 'image/svg+xml',
     '.ico': 'image/x-icon'
@@ -326,11 +202,142 @@ function getMimeType(filePath) {
   return mimeTypes[ext] || 'application/octet-stream';
 }
 
-// ==================== 路由处理 ====================
+// 限流检查
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1分钟
+  const maxRequests = 5; // 最多5次
 
-/**
- * 处理静态文件请求
- */
+  const record = rateLimitMap.get(ip);
+  if (!record) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+    return { allowed: true };
+  }
+
+  if (now > record.resetTime) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
+    return { allowed: true };
+  }
+
+  if (record.count >= maxRequests) {
+    const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+
+  record.count++;
+  return { allowed: true };
+}
+
+// ==================== toca Token 管理 ====================
+async function getTocaAppToken() {
+  if (tocaTokens.appToken && tocaTokens.appTokenExpiresAt > Date.now() + 5 * 60 * 1000) {
+    return tocaTokens.appToken;
+  }
+
+  const response = await request({
+    method: 'POST',
+    protocol: 'http:',
+    hostname: 'toca.17u.cn',
+    path: '/open-api/auth/app-token',
+    headers: { 'Content-Type': 'application/json' }
+  }, {
+    appKey: CONFIG.TOCA_APP_KEY,
+    appSecret: CONFIG.TOCA_APP_SECRET
+  });
+
+  if (!response.data.success) {
+    throw new Error(`获取 toca appToken 失败: ${response.data.message}`);
+  }
+
+  const token = response.data.data?.accessToken || response.data.data?.token;
+  tocaTokens.appToken = token;
+  tocaTokens.appTokenExpiresAt = Date.now() + 7200 * 1000;
+  return token;
+}
+
+async function getTocaSpaceToken() {
+  if (tocaTokens.spaceToken && tocaTokens.spaceTokenExpiresAt > Date.now() + 5 * 60 * 1000) {
+    return tocaTokens.spaceToken;
+  }
+
+  const response = await request({
+    method: 'POST',
+    protocol: 'http:',
+    hostname: 'toca.17u.cn',
+    path: '/open-api/auth/space-token',
+    headers: { 'Content-Type': 'application/json' }
+  }, {
+    appKey: CONFIG.TOCA_APP_KEY,
+    appSecret: CONFIG.TOCA_APP_SECRET,
+    spaceId: CONFIG.TOCA_SPACE_ID
+  });
+
+  if (!response.data.success) {
+    throw new Error(`获取 toca spaceToken 失败: ${response.data.message}`);
+  }
+
+  const spaceToken = response.data.data?.accessToken || response.data.data?.token;
+  tocaTokens.spaceToken = spaceToken;
+  tocaTokens.spaceTokenExpiresAt = Date.now() + 7200 * 1000;
+  return spaceToken;
+}
+
+async function initTocaTokens() {
+  try {
+    await getTocaAppToken();
+    await getTocaSpaceToken();
+    console.log(`[${formatDate()}] toca Token 初始化完成`);
+  } catch (error) {
+    console.error(`[${formatDate()}] toca Token 初始化失败:`, error.message);
+  }
+}
+
+async function refreshTocaUserToken(refreshToken) {
+  const response = await request({
+    method: 'POST',
+    protocol: 'http:',
+    hostname: 'toca.17u.cn',
+    path: '/open-api/auth/v2/user-token/refresh',
+    headers: { 'Content-Type': 'application/json' }
+  }, { refreshToken });
+
+  if (!response.data.success) {
+    throw new Error(`刷新 toca userToken 失败: ${response.data.message}`);
+  }
+
+  return response.data.data;
+}
+
+async function checkAndRefreshUserToken(sessionId) {
+  const session = userSessions.get(sessionId);
+  if (!session) return null;
+
+  const now = Date.now();
+  const expireTime = session.accessTokenExpireInTimestamp * 1000;
+
+  if (now > expireTime + 5 * 60 * 1000) {
+    userSessions.delete(sessionId);
+    return null;
+  }
+
+  if (now > expireTime - 10 * 60 * 1000) {
+    try {
+      const newTokenData = await refreshTocaUserToken(session.refreshToken);
+      session.userAccessToken = newTokenData.userAccessToken;
+      session.refreshToken = newTokenData.refreshToken;
+      session.accessTokenExpireInTimestamp = newTokenData.accessTokenExpireInTimestamp * 1000;
+    } catch (error) {
+      if (now > expireTime) {
+        userSessions.delete(sessionId);
+        return null;
+      }
+    }
+  }
+
+  return session;
+}
+
+// ==================== 路由处理 ====================
 async function serveStatic(req, res, filePath) {
   try {
     const fullPath = path.join(__dirname, filePath);
@@ -341,7 +348,14 @@ async function serveStatic(req, res, filePath) {
     }
 
     const content = await fs.promises.readFile(fullPath);
-    res.writeHead(200, { 'Content-Type': getMimeType(fullPath) });
+    const mimeType = getMimeType(fullPath);
+    const headers = { 'Content-Type': mimeType };
+
+    if (mimeType === 'text/html') {
+      headers['Cache-Control'] = 'no-store, no-cache, must-revalidate';
+    }
+
+    res.writeHead(200, headers);
     res.end(content);
     return true;
   } catch (e) {
@@ -349,263 +363,502 @@ async function serveStatic(req, res, filePath) {
   }
 }
 
-/**
- * 处理飞书 OAuth 回调
- */
-async function handleOAuthCallback(req, res) {
+async function handleTocaLogin(req, res) {
+  try {
+    const state = generateUUID();
+    const redirectUri = encodeURIComponent(CONFIG.TOCA_REDIRECT_URI);
+
+    oauthStates.set(state, { createdAt: Date.now() });
+
+    const now = Date.now();
+    for (const [key, value] of oauthStates.entries()) {
+      if (now - value.createdAt > 5 * 60 * 1000) {
+        oauthStates.delete(key);
+      }
+    }
+
+    const authUrl = `${CONFIG.TOCA_OAUTH_AUTHORIZE_URL}?agentId=${CONFIG.TOCA_AGENT_ID}&redirectUri=${redirectUri}&state=${state}`;
+
+    console.log(`[${formatDate()}] 重定向到 toca 授权页面`);
+
+    res.writeHead(302, { 'Location': authUrl });
+    res.end();
+  } catch (error) {
+    console.error(`[${formatDate()}] 登录跳转错误:`, error.message);
+    sendError(res, '登录跳转失败', 500);
+  }
+}
+
+async function handleTocaCallback(req, res) {
   try {
     const query = url.parse(req.url, true).query;
     const code = query.code;
+    const state = query.state;
 
-    if (!code) {
-      // 授权失败或用户取消
-      const errorMsg = query.error || '授权失败';
-      return res.end(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>授权失败</title>
-          <style>
-            body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
-            .container { text-align: center; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-            .icon { font-size: 48px; margin-bottom: 16px; }
-            h2 { margin: 0 0 8px; color: #333; }
-            p { color: #666; margin: 0 0 20px; }
-            .btn { display: inline-block; padding: 12px 24px; background: #1677ff; color: #fff; text-decoration: none; border-radius: 8px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="icon">❌</div>
-            <h2>授权失败</h2>
-            <p>${errorMsg}</p>
-            <a href="/" class="btn">返回重试</a>
-          </div>
-        </body>
-        </html>
-      `);
+    if (!state || !oauthStates.has(state)) {
+      return renderErrorPage(res, '授权失败', '安全校验失败，请重新登录');
     }
 
-    // 使用 code 换取用户 token
-    console.log(`[${formatDate()}] 正在用 code 换取用户 token...`);
-    const userInfo = await getUserAccessToken(code);
-    console.log(`[${formatDate()}] 获取到用户 token, openId: ${userInfo.openId}`);
+    oauthStates.delete(state);
 
-    // 存储用户 token
-    userTokens.set(userInfo.openId, {
-      accessToken: userInfo.accessToken,
-      refreshToken: userInfo.refreshToken,
-      expiresAt: Date.now() + userInfo.expiresIn * 1000,
-      userName: userInfo.userName,
-      userAvatar: userInfo.userAvatar
+    if (!code) {
+      return renderErrorPage(res, '授权失败', query.error || '授权失败');
+    }
+
+    const appToken = await getTocaAppToken();
+
+    const response = await request({
+      method: 'POST',
+      protocol: 'http:',
+      hostname: 'toca.17u.cn',
+      path: '/open-api/oauth/getUserByAuthCode',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': appToken
+      }
+    }, { authCode: code });
+
+    if (!response.data.success) {
+      throw new Error(`获取用户信息失败: ${response.data.message}`);
+    }
+
+    const userData = response.data.data;
+    const sessionId = generateUUID();
+
+    userSessions.set(sessionId, {
+      openId: userData.openId,
+      outerMemberId: userData.outerMemberId,
+      employeeNo: userData.employeeNo,
+      userAccessToken: userData.userAccessToken,
+      refreshToken: userData.refreshToken,
+      accessTokenExpireInTimestamp: userData.accessTokenExpireInTimestamp * 1000,
+      loginTime: Date.now()
     });
 
-    // 打印当前所有存储的 token（调试用）
-    console.log(`[${formatDate()}] 当前存储的用户 token 列表:`, Array.from(userTokens.keys()));
+    console.log(`[${formatDate()}] 用户登录成功: ${userData.employeeNo || userData.openId}`);
 
-    console.log(`[${formatDate()}] 用户登录成功: ${userInfo.openId}, 姓名: ${userInfo.userName}`);
-    console.log(`[${formatDate()}] === 如需接收消息通知，请将以下 open_id 复制到 CONFIG.NOTIFICATION_USER_ID 中 ===`);
-    console.log(`[${formatDate()}] NOTIFICATION_USER_ID: ${userInfo.openId}`);
-    console.log(`[${formatDate()}] =====================================================================`);
+    const isLocalhost = CONFIG.TOCA_REDIRECT_URI.includes('localhost');
+    const cookieOptions = isLocalhost
+      ? `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=Lax`
+      : `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=None; Secure`;
 
-    // 返回成功页面，自动跳转到首页
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>登录成功</title>
-        <style>
-          body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
-          .container { text-align: center; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-          .icon { font-size: 48px; margin-bottom: 16px; }
-          h2 { margin: 0 0 8px; color: #333; }
-          p { color: #666; margin: 0 0 20px; }
-          .btn { display: inline-block; padding: 12px 24px; background: #1677ff; color: #fff; text-decoration: none; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">✅</div>
-          <h2>登录成功</h2>
-          <p>正在跳转回反馈页面...</p>
-        </div>
-        <script>
-          // 存储用户信息到 localStorage
-          localStorage.setItem('feishu_openId', '${userInfo.openId}');
-          localStorage.setItem('feishu_userName', '${userInfo.userName || ''}');
-          localStorage.setItem('feishu_userAvatar', '${userInfo.userAvatar || ''}');
-          // 跳转到首页
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 1500);
-        </script>
-      </body>
-      </html>
-    `);
+    res.writeHead(302, {
+      'Location': '/',
+      'Set-Cookie': cookieOptions
+    });
+    res.end();
 
   } catch (error) {
     console.error(`[${formatDate()}] OAuth 回调错误:`, error.message);
-    res.writeHead(500, { 'Content-Type': 'text/html' });
-    res.end(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>授权出错</title>
-        <style>
-          body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
-          .container { text-align: center; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-          .icon { font-size: 48px; margin-bottom: 16px; }
-          h2 { margin: 0 0 8px; color: #333; }
-          p { color: #666; margin: 0 0 20px; }
-          .btn { display: inline-block; padding: 12px 24px; background: #1677ff; color: #fff; text-decoration: none; border-radius: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="icon">❌</div>
-          <h2>授权出错</h2>
-          <p>${error.message}</p>
-          <a href="/" class="btn">返回重试</a>
-        </div>
-      </body>
-      </html>
-    `);
+    renderErrorPage(res, '授权出错', error.message);
   }
 }
 
-/**
- * 处理 /api/submit 接口
- */
-async function handleSubmit(req, res) {
+function renderErrorPage(res, title, message) {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title}</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+        .container { text-align: center; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h2 { margin: 0 0 8px; color: #333; }
+        p { color: #666; margin: 0 0 20px; }
+        .btn { display: inline-block; padding: 12px 24px; background: #1677ff; color: #fff; text-decoration: none; border-radius: 8px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">❌</div>
+        <h2>${title}</h2>
+        <p>${message}</p>
+        <a href="/" class="btn">返回重试</a>
+      </div>
+    </body>
+    </html>
+  `);
+}
+
+function handleLogout(req, res) {
   try {
-    const body = await parseBody(req);
+    const cookie = req.headers.cookie;
+    if (cookie) {
+      const cookies = cookie.split(';').reduce((acc, c) => {
+        const [key, value] = c.trim().split('=');
+        acc[key] = value;
+        return acc;
+      }, {});
 
-    // 参数校验
-    if (!body.type || !body.description) {
-      return sendError(res, '缺少必要参数：type 和 description 为必填项', 400);
-    }
-
-    // 检查用户是否已登录
-    const openId = body.openId;
-    console.log(`[${formatDate()}] 收到提交请求, openId: ${openId}`);
-    console.log(`[${formatDate()}] 当前存储的用户 token 列表:`, Array.from(userTokens.keys()));
-
-    if (!openId) {
-      console.log(`[${formatDate()}] 缺少 openId`);
-      return sendError(res, '请先登录飞书', 401);
-    }
-
-    if (!userTokens.has(openId)) {
-      console.log(`[${formatDate()}] openId 未在 token 存储中找到: ${openId}`);
-      return sendError(res, '请先登录飞书', 401);
-    }
-
-    const userToken = userTokens.get(openId).accessToken;
-    const userInfo = userTokens.get(openId);
-
-    // 处理图片上传
-    let imageUrls = [];
-    const origin = req.headers.origin || `http://localhost:${CONFIG.PORT}`;
-    if (body.images && Array.isArray(body.images) && body.images.length > 0) {
-      const uploadDir = path.join(__dirname, 'uploads');
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
-      }
-
-      for (let i = 0; i < body.images.length; i++) {
-        const base64Data = body.images[i].replace(/^data:image\/\w+;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        const filename = `${Date.now()}_${i}.png`;
-        const filepath = path.join(uploadDir, filename);
-        fs.writeFileSync(filepath, buffer);
-        // 使用完整URL
-        imageUrls.push(`${origin}/uploads/${filename}`);
+      const sessionId = cookies.sessionId;
+      if (sessionId) {
+        userSessions.delete(sessionId);
+        console.log(`[${formatDate()}] 用户退出登录: ${sessionId}`);
       }
     }
 
-    // 构建记录数据
-    // 注意：字段名需要与你的多维表格字段名一致
-    const record = {
-      '问题类型': body.type,
-      '问题描述': body.description,
-      '联系方式': body.contact || '',
-      '提交时间': formatDate(),
-      '设备信息': body.deviceInfo || '',
-      '图片链接': imageUrls.length > 0 ? imageUrls.join('\n') : ''
-    };
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Set-Cookie': 'sessionId=; HttpOnly; Path=/; Max-Age=0'
+    });
+    res.end(JSON.stringify({ success: true, message: '退出成功' }));
+  } catch (error) {
+    sendError(res, '退出登录失败');
+  }
+}
 
-    // 人员字段使用对象数组格式
-    if (openId && openId.startsWith('ou_')) {
-      record['反馈用户'] = [{
-        'id': openId,
-        'name': userInfo.userName || '',
-        'en_name': userInfo.userName || ''
-      }];
-    } else if (openId) {
-      // 备用方案：直接用文本存储用户标识
-      record['反馈用户'] = userInfo.userName || openId;
+async function handleGetUserInfo(req, res) {
+  try {
+    const cookie = req.headers.cookie;
+    if (!cookie) {
+      return sendSuccess(res, { loggedIn: false });
     }
 
-    // 使用用户 Token 写入（利用用户身份权限 base:record:create）
-    await writeToFeishu(userToken, record);
-    console.log(`[${formatDate()}] 反馈提交成功: ${body.type}`);
+    const cookies = cookie.split(';').reduce((acc, c) => {
+      const [key, value] = c.trim().split('=');
+      acc[key] = value;
+      return acc;
+    }, {});
 
-    // 发送通知给管理员
-    sendNotification(userInfo.userName, body.type, body.description, body.contact);
+    const sessionId = cookies.sessionId;
+    if (!sessionId) {
+      return sendSuccess(res, { loggedIn: false });
+    }
 
-    sendSuccess(res, { message: '提交成功' });
+    const session = await checkAndRefreshUserToken(sessionId);
+    if (!session) {
+      return sendSuccess(res, { loggedIn: false });
+    }
+
+    sendSuccess(res, {
+      loggedIn: true,
+      openId: session.openId,
+      employeeNo: session.employeeNo,
+      outerMemberId: session.outerMemberId
+    });
 
   } catch (error) {
-    console.error(`[${formatDate()}] 提交失败:`, error.message);
-    sendError(res, error.message || '服务器内部错误');
+    sendError(res, '获取用户信息失败');
   }
+}
+
+// ==================== 反馈提交接口 ====================
+function handleSubmit(req, res) {
+  // 获取客户端 IP
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+  // 限流检查
+  const rateLimit = checkRateLimit(clientIp);
+  if (!rateLimit.allowed) {
+    return sendError(res, `请求过于频繁，请 ${rateLimit.retryAfter} 秒后重试`, 429);
+  }
+
+  // 检查登录状态
+  const cookie = req.headers.cookie;
+  if (!cookie) {
+    return sendError(res, '请先登录', 401);
+  }
+
+  const cookies = cookie.split(';').reduce((acc, c) => {
+    const [key, value] = c.trim().split('=');
+    acc[key] = value;
+    return acc;
+  }, {});
+
+  const sessionId = cookies.sessionId;
+  if (!sessionId || !userSessions.has(sessionId)) {
+    return sendError(res, '请先登录', 401);
+  }
+
+  const session = userSessions.get(sessionId);
+
+  // 使用 multer 处理文件上传
+  upload.array('images', 3)(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return sendError(res, '单张图片不能超过 10MB', 400);
+        }
+        if (err.code === 'LIMIT_FILE_COUNT') {
+          return sendError(res, '最多上传 3 张图片', 400);
+        }
+      }
+      return sendError(res, err.message || '文件上传失败', 400);
+    }
+
+    const { issue_type, description, contact, device_info } = req.body;
+
+    // 参数校验
+    if (!issue_type || !description) {
+      // 删除已上传的文件
+      if (req.files) {
+        req.files.forEach(file => {
+          fs.unlink(file.path, () => {});
+        });
+      }
+      return sendError(res, '问题类型和描述不能为空', 400);
+    }
+
+    // 收集图片路径
+    const imagePaths = req.files ? req.files.map(f => f.filename) : [];
+
+    // 写入数据库
+    db.run(
+      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId],
+      function(err) {
+        if (err) {
+          console.error(`[${formatDate()}] 数据库写入失败:`, err);
+          // 删除已上传的文件
+          if (req.files) {
+            req.files.forEach(file => {
+              fs.unlink(file.path, () => {});
+            });
+          }
+          return sendError(res, '提交失败，请重试');
+        }
+
+        console.log(`[${formatDate()}] 反馈提交成功: id=${this.lastID}, type=${issue_type}`);
+        sendSuccess(res, { id: this.lastID, message: '提交成功' });
+      }
+    );
+  });
+}
+
+// ==================== 查询接口 ====================
+function handleList(req, res) {
+  // 密码校验
+  const adminPassword = req.headers['admin-password'];
+  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
+    return sendError(res, '密码错误', 401);
+  }
+
+  const parsedUrl = url.parse(req.url, true);
+  const query = parsedUrl.query;
+
+  const issueType = query.issue_type;
+  const page = parseInt(query.page) || 1;
+  const pageSize = Math.min(parseInt(query.page_size) || 20, 100);
+  const offset = (page - 1) * pageSize;
+
+  // 构建查询条件
+  let whereClause = '';
+  let countParams = [];
+  let queryParams = [];
+
+  if (issueType && issueType !== 'all') {
+    whereClause = 'WHERE issue_type = ?';
+    countParams.push(issueType);
+    queryParams.push(issueType);
+  }
+
+  // 查询总数
+  const countSql = `SELECT COUNT(*) as total FROM feedback ${whereClause}`;
+
+  db.get(countSql, countParams, (err, countRow) => {
+    if (err) {
+      console.error(`[${formatDate()}] 查询总数失败:`, err);
+      return sendError(res, '查询失败');
+    }
+
+    const total = countRow.total;
+
+    // 查询列表
+    const listSql = `SELECT * FROM feedback ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    queryParams.push(pageSize, offset);
+
+    db.all(listSql, queryParams, (err, rows) => {
+      if (err) {
+        console.error(`[${formatDate()}] 查询列表失败:`, err);
+        return sendError(res, '查询失败');
+      }
+
+      // 处理图片路径
+      const formattedRows = rows.map(row => ({
+        ...row,
+        images: row.images ? JSON.parse(row.images) : []
+      }));
+
+      sendSuccess(res, {
+        list: formattedRows,
+        total,
+        page,
+        page_size: pageSize,
+        total_pages: Math.ceil(total / pageSize)
+      });
+    });
+  });
+}
+
+// ==================== 统计接口 ====================
+function handleStats(req, res) {
+  // 密码校验
+  const adminPassword = req.headers['admin-password'];
+  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
+    return sendError(res, '密码错误', 401);
+  }
+
+  db.all(
+    `SELECT issue_type, COUNT(*) as count FROM feedback GROUP BY issue_type`,
+    (err, rows) => {
+      if (err) {
+        console.error(`[${formatDate()}] 统计查询失败:`, err);
+        return sendError(res, '查询失败');
+      }
+
+      const stats = {
+        total: 0,
+        by_type: {}
+      };
+
+      rows.forEach(row => {
+        stats.by_type[row.issue_type] = row.count;
+        stats.total += row.count;
+      });
+
+      sendSuccess(res, stats);
+    }
+  );
+}
+
+// ==================== 导出接口 ====================
+function handleExport(req, res) {
+  // 密码校验
+  const adminPassword = req.headers['admin-password'];
+  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
+    return sendError(res, '密码错误', 401);
+  }
+
+  const parsedUrl = url.parse(req.url, true);
+  const query = parsedUrl.query;
+  const issueType = query.issue_type;
+
+  // 构建查询条件
+  let whereClause = '';
+  let queryParams = [];
+
+  if (issueType && issueType !== 'all') {
+    whereClause = 'WHERE issue_type = ?';
+    queryParams.push(issueType);
+  }
+
+  // 查询所有数据（不分页）
+  const sql = `SELECT * FROM feedback ${whereClause} ORDER BY created_at DESC`;
+
+  db.all(sql, queryParams, (err, rows) => {
+    if (err) {
+      console.error(`[${formatDate()}] 导出查询失败:`, err);
+      return sendError(res, '导出失败');
+    }
+
+    // 生成 CSV 内容
+    const headers = ['ID', '问题类型', '问题描述', '联系方式', '图片链接', '设备信息', '提交时间'];
+    let csvContent = headers.join(',') + '\n';
+
+    rows.forEach(row => {
+      const images = row.images ? JSON.parse(row.images).map(img => `${req.headers.host}/data/uploads/${img}`).join('; ') : '';
+      const values = [
+        row.id,
+        escapeCsv(row.issue_type),
+        escapeCsv(row.description),
+        escapeCsv(row.contact || ''),
+        escapeCsv(images),
+        escapeCsv(row.device_info || ''),
+        row.created_at
+      ];
+      csvContent += values.join(',') + '\n';
+    });
+
+    // 添加 BOM 以支持中文
+    const bom = '\uFEFF';
+    const buffer = Buffer.from(bom + csvContent, 'utf-8');
+
+    // 生成文件名
+    const timestamp = formatDate().replace(/[:\s]/g, '_');
+    const filename = `feedback_export_${timestamp}.csv`;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length
+    });
+    res.end(buffer);
+
+    console.log(`[${formatDate()}] 导出成功: ${filename}, 共 ${rows.length} 条记录`);
+  });
+}
+
+// CSV 字段转义
+function escapeCsv(value) {
+  if (value == null) return '';
+  const str = String(value);
+  // 如果包含逗号、引号或换行符，需要用引号包裹并转义
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
 }
 
 // ==================== 主服务器 ====================
-
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-  // 设置 CORS
   setCORS(res, '*');
 
-  // 处理预检请求
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
     return;
   }
 
-  // 路由匹配
   try {
-    // API 路由
-    if (pathname === '/api/submit' && req.method === 'POST') {
-      return await handleSubmit(req, res);
+    // 登录相关路由
+    if (pathname === '/api/auth/login' && req.method === 'GET') {
+      return await handleTocaLogin(req, res);
     }
 
-    // 获取飞书授权 URL
-    if (pathname === '/api/auth-url' && req.method === 'GET') {
-      const redirectUri = `${req.headers.origin || `http://localhost:${CONFIG.PORT}`}/callback`;
-      const authUrl = `${CONFIG.FEISHU_OAUTH_URL}?redirect_uri=${encodeURIComponent(redirectUri)}&app_id=${CONFIG.FEISHU_APP_ID}`;
-      return sendSuccess(res, { authUrl });
+    if (pathname === '/api/auth/callback' && req.method === 'GET') {
+      return await handleTocaCallback(req, res);
     }
 
-    // 飞书 OAuth 回调
-    if (pathname === '/callback' && req.method === 'GET') {
-      return await handleOAuthCallback(req, res);
+    if (pathname === '/api/auth/logout' && req.method === 'GET') {
+      return handleLogout(req, res);
     }
 
-    // 图片上传目录访问
-    if (pathname.startsWith('/uploads/') && req.method === 'GET') {
-      const imagePath = path.join(__dirname, pathname);
+    if (pathname === '/api/user/info' && req.method === 'GET') {
+      return await handleGetUserInfo(req, res);
+    }
+
+    // 反馈提交接口
+    if (pathname === '/api/feedback/submit' && req.method === 'POST') {
+      return handleSubmit(req, res);
+    }
+
+    // 查询接口
+    if (pathname === '/api/feedback/list' && req.method === 'GET') {
+      return handleList(req, res);
+    }
+
+    // 统计接口
+    if (pathname === '/api/feedback/stats' && req.method === 'GET') {
+      return handleStats(req, res);
+    }
+
+    // 导出接口
+    if (pathname === '/api/feedback/export' && req.method === 'GET') {
+      return handleExport(req, res);
+    }
+
+    // 图片访问路由
+    if (pathname.startsWith('/data/uploads/') && req.method === 'GET') {
+      const filename = path.basename(pathname);
+      const imagePath = path.join(CONFIG.UPLOAD_DIR, filename);
       try {
         const content = await fs.promises.readFile(imagePath);
         const ext = path.extname(imagePath).toLowerCase();
@@ -639,7 +892,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 404
     sendError(res, 'Not Found', 404);
 
   } catch (error) {
@@ -649,26 +901,26 @@ const server = http.createServer(async (req, res) => {
 });
 
 // 启动服务器
-server.listen(CONFIG.PORT, () => {
+server.listen(CONFIG.PORT, async () => {
   console.log('='.repeat(50));
   console.log('用户反馈服务已启动');
   console.log('='.repeat(50));
   console.log(`访问地址: http://localhost:${CONFIG.PORT}`);
-  console.log(`API 接口: http://localhost:${CONFIG.PORT}/api/submit`);
+  console.log(`登录地址: http://localhost:${CONFIG.PORT}/api/auth/login`);
+  console.log(`管理后台: http://localhost:${CONFIG.PORT}/admin.html`);
   console.log('='.repeat(50));
-  console.log('请确保已配置飞书应用信息:');
-  console.log(`  - FEISHU_APP_ID: ${CONFIG.FEISHU_APP_ID === 'cli_xxxxxxxxxxxxxxxx' ? '未配置 ⚠️' : '已配置 ✓'}`);
-  console.log(`  - FEISHU_APP_SECRET: ${CONFIG.FEISHU_APP_SECRET === 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' ? '未配置 ⚠️' : '已配置 ✓'}`);
-  console.log(`  - FEISHU_APP_TOKEN: ${CONFIG.FEISHU_APP_TOKEN === 'xxxxxxxxxxxxxxxx' ? '未配置 ⚠️' : '已配置 ✓'}`);
-  console.log(`  - FEISHU_TABLE_ID: ${CONFIG.FEISHU_TABLE_ID === 'tblxxxxxxxxxxxxx' ? '未配置 ⚠️' : '已配置 ✓'}`);
-  console.log('='.repeat(50));
-  console.log('提示: 首次使用需要登录飞书，使用用户身份权限写入表格');
-  console.log('='.repeat(50));
+
+  // 初始化数据库
+  initDatabase();
+
+  // 初始化 toca Token
+  await initTocaTokens();
 });
 
 // 优雅退出
 process.on('SIGTERM', () => {
   console.log('正在关闭服务...');
+  if (db) db.close();
   server.close(() => {
     console.log('服务已关闭');
     process.exit(0);
@@ -677,6 +929,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('\n正在关闭服务...');
+  if (db) db.close();
   server.close(() => {
     console.log('服务已关闭');
     process.exit(0);

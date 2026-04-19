@@ -20,18 +20,47 @@
 └── README.md     # 说明文档
 ```
 
+## 系统架构
+
+- **登录**: toca 统一认证系统
+- **数据存储**: 飞书多维表格
+- **消息通知**: 飞书 IM
+
 ## 快速开始
 
-### 1. 配置飞书应用
+### 1. 配置 toca 登录（公司内部认证）
 
-#### 1.1 创建飞书应用
+#### 1.1 获取 toca 应用凭证
+
+联系 toca 平台管理员获取：
+
+- **App Key**（应用标识）
+- **App Secret**（应用密钥）
+- **Agent ID**（应用 agentId）
+- **Space ID**（租户 ID，通常是 `0583d`）
+
+#### 1.2 配置回调地址
+
+在 toca 平台配置 OAuth 回调地址：
+```
+http://你的域名/api/auth/callback
+```
+
+本地开发时可使用：
+```
+http://localhost:3000/api/auth/callback
+```
+
+### 2. 配置飞书应用（表格和IM通知）
+
+#### 2.1 创建飞书应用
 
 1. 访问 [飞书开放平台](https://open.feishu.cn/app)
 2. 点击「创建企业自建应用」
 3. 填写应用名称（如「用户反馈收集」），选择应用类型为「企业内部应用」
 4. 点击「确定创建」
 
-#### 1.2 开通权限
+#### 2.2 开通权限
 
 进入应用详情页，点击「权限管理」，搜索并开通以下权限：
 
@@ -42,7 +71,7 @@
 
 > 搜索关键词：「多维表格」或「bitable」
 
-#### 1.3 发布应用
+#### 2.3 发布应用
 
 1. 点击「版本管理与发布」
 2. 点击「创建版本」
@@ -50,16 +79,16 @@
 4. 点击「保存并发布」
 5. 联系企业管理员审批通过
 
-#### 1.4 获取应用凭证
+#### 2.4 获取应用凭证
 
 在「凭证与基础信息」页面，获取：
 
 - **App ID**（应用 ID）
 - **App Secret**（应用密钥）
 
-### 2. 创建多维表格
+### 3. 创建多维表格
 
-#### 2.1 创建表格
+#### 3.1 创建表格
 
 1. 在飞书中创建一个新的多维表格
 2. 按以下格式创建字段：
@@ -71,10 +100,11 @@
 | 联系方式 | 文本 | 手机号或微信号 |
 | 提交时间 | 文本 | 自动生成 |
 | 设备信息 | 文本 | 自动获取的设备信息 |
+| 反馈用户 | 文本 | 用户工号或标识 |
 
 > 注意：字段名称必须与上述完全一致
 
-#### 2.2 获取表格信息
+#### 3.2 获取表格信息
 
 1. 打开多维表格
 2. 从浏览器地址栏复制 `app_token`
@@ -87,29 +117,37 @@
 > - 打开文档 → 右上角「...」→「复制链接」
 > - 链接中 `/base/` 后的字符串即为 `app_token`
 
-### 3. 配置并启动服务
+### 4. 配置并启动服务
 
-#### 3.1 修改配置
+#### 4.1 修改配置
 
 编辑 `server.js`，修改以下配置项：
 
 ```javascript
 const CONFIG = {
-  // 飞书应用凭证
-  FEISHU_APP_ID: 'cli_xxxxxxxxxxxxxxxx',      // 替换为你的 App ID
-  FEISHU_APP_SECRET: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',  // 替换为你的 App Secret
+  // ===== toca 登录配置 =====
+  TOCA_APP_KEY: 'your_app_key_here',           // toca App Key
+  TOCA_APP_SECRET: 'your_app_secret_here',     // toca App Secret
+  TOCA_SPACE_ID: '0583d',                      // 租户ID
+  TOCA_REDIRECT_URI: 'http://你的域名/api/auth/callback',  // 回调地址
+  TOCA_AGENT_ID: 'your_agent_id_here',         // toca Agent ID
 
-  // 多维表格信息
-  FEISHU_APP_TOKEN: 'xxxxxxxxxxxxxxxx',       // 替换为表格的 app_token
-  FEISHU_TABLE_ID: 'tblxxxxxxxxxxxxx',        // 替换为表格的 table_id
+  // ===== 飞书表格和IM配置 =====
+  FEISHU_APP_ID: 'cli_xxxxxxxxxxxxxxxx',       // 飞书 App ID
+  FEISHU_APP_SECRET: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',  // 飞书 App Secret
+  FEISHU_APP_TOKEN: 'xxxxxxxxxxxxxxxx',        // 多维表格 app_token
+  FEISHU_TABLE_ID: 'tblxxxxxxxxxxxxx',         // 多维表格 table_id
+
+  // 消息通知配置
+  NOTIFICATION_USER_ID: 'ou_xxxxxxxxxxxxxxxx', // 接收通知的用户 open_id
+  BITABLE_VIEW_URL: 'https://base.feishu.cn/base/xxx', // 表格访问链接
 
   // 服务端口号
   PORT: 3000,
-  ...
 };
 ```
 
-#### 3.2 启动服务
+#### 4.2 启动服务
 
 ```bash
 # 进入项目目录
@@ -126,9 +164,16 @@ node server.js
 用户反馈服务已启动
 ==================================================
 访问地址: http://localhost:3000
+登录地址: http://localhost:3000/api/auth/login
 API 接口: http://localhost:3000/api/submit
 ==================================================
-请确保已配置飞书应用信息:
+请确保已配置 toca 应用信息:
+  - TOCA_APP_KEY: 已配置 ✓
+  - TOCA_APP_SECRET: 已配置 ✓
+  - TOCA_AGENT_ID: 已配置 ✓
+  - TOCA_REDIRECT_URI: 已配置 ✓
+==================================================
+飞书配置（表格和IM）:
   - FEISHU_APP_ID: 已配置 ✓
   - FEISHU_APP_SECRET: 已配置 ✓
   - FEISHU_APP_TOKEN: 已配置 ✓
@@ -136,17 +181,62 @@ API 接口: http://localhost:3000/api/submit
 ==================================================
 ```
 
-#### 3.3 访问页面
+#### 4.3 访问页面
 
-在浏览器中打开：`http://localhost:3000`
+1. 在浏览器中打开：`http://localhost:3000`
+2. 点击「立即登录」跳转到 toca 认证页面
+3. 完成登录后自动返回反馈页面
 
 或使用二维码工具生成二维码，手机扫码测试。
 
 ## API 接口
 
+### GET /api/auth/login
+
+跳转到 toca 登录授权页面
+
+- 自动重定向到 toca OAuth 授权页面
+- 用户完成授权后跳转到 `/api/auth/callback`
+- 登录成功后写入 `sessionId` cookie
+
+### GET /api/auth/callback
+
+toca OAuth 回调处理
+
+- 接收 `code` 和 `state` 参数
+- 校验 state 防止 CSRF 攻击
+- 获取用户信息并创建 session
+- 写入 cookie 并重定向回首页
+
+### GET /api/user/info
+
+获取当前登录用户信息
+
+**响应结果：**
+
+```json
+// 已登录
+{
+  "success": true,
+  "loggedIn": true,
+  "openId": "xxx",
+  "employeeNo": "E12345",
+  "outerMemberId": "xxx"
+}
+
+// 未登录
+{
+  "success": true,
+  "loggedIn": false
+}
+```
+
 ### POST /api/submit
 
 提交反馈数据
+
+**请求头：**
+- 需要携带 `Cookie: sessionId=xxx`（自动携带）
 
 **请求参数：**
 
@@ -155,7 +245,8 @@ API 接口: http://localhost:3000/api/submit
   "type": "崩溃",
   "description": "详细描述问题...",
   "contact": "13800138000",
-  "deviceInfo": "iOS 16.5 | Mozilla/5.0..."
+  "deviceInfo": "iOS 16.5 | Mozilla/5.0...",
+  "images": ["data:image/png;base64,..."]
 }
 ```
 
@@ -167,6 +258,13 @@ API 接口: http://localhost:3000/api/submit
   "success": true,
   "message": "提交成功"
 }
+
+// 未登录
+{
+  "success": false,
+  "message": "请先登录"
+}
+// HTTP Status: 401
 
 // 失败
 {

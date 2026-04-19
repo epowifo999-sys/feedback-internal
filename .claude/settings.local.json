@@ -14,7 +14,10 @@
       "Bash(killall -9 node)",
       "Bash(node /Users/tcd-1223489/Documents/cc-用户反馈页面/server.js)",
       "Bash(pkill -9 -f \"node.*server.js\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "WebFetch(domain:open.feishu.cn)",
+      "Bash(npm install:*)",
+      "Bash(lsof -ti:3001)"
     ]
   }
 }

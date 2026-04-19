@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>反馈管理后台</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    /* 密码弹窗 */
+    .password-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+
+    .password-modal.hidden {
+      display: none;
+    }
+
+    .password-box {
+      background: #fff;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .password-box h2 {
+      margin-bottom: 24px;
+      text-align: center;
+      color: #1a1a1a;
+    }
+
+    .password-box input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      font-size: 16px;
+      margin-bottom: 16px;
+    }
+
+    .password-box input:focus {
+      outline: none;
+      border-color: #1677ff;
+    }
+
+    .password-box button {
+      width: 100%;
+      padding: 12px;
+      background: #1677ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    .password-box button:hover {
+      background: #4096ff;
+    }
+
+    .password-error {
+      color: #ff4d4f;
+      font-size: 14px;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* 主布局 */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      background: #fff;
+      padding: 20px 24px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .header h1 {
+      font-size: 24px;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    .header-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    /* 统计卡片 */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .stat-card.total {
+      border-left: 4px solid #1677ff;
+    }
+
+    .stat-card.crash {
+      border-left: 4px solid #ff4d4f;
+    }
+
+    .stat-card.bug {
+      border-left: 4px solid #faad14;
+    }
+
+    .stat-card.suggest {
+      border-left: 4px solid #52c41a;
+    }
+
+    .stat-card.other {
+      border-left: 4px solid #8c8c8c;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    /* 筛选器 */
+    .filter-bar {
+      background: #fff;
+      padding: 16px 24px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-btn {
+      padding: 8px 16px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .filter-btn:hover {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+
+    .filter-btn.active {
+      background: #1677ff;
+      color: #fff;
+      border-color: #1677ff;
+    }
+
+    /* 反馈列表 */
+    .feedback-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .feedback-item {
+      background: #fff;
+      padding: 20px 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+
+    .feedback-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .feedback-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .type-tag {
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .type-tag.crash {
+      background: #fff1f0;
+      color: #ff4d4f;
+    }
+
+    .type-tag.bug {
+      background: #fffbe6;
+      color: #faad14;
+    }
+
+    .type-tag.suggest {
+      background: #f6ffed;
+      color: #52c41a;
+    }
+
+    .type-tag.other {
+      background: #f5f5f5;
+      color: #8c8c8c;
+    }
+
+    .feedback-time {
+      font-size: 13px;
+      color: #999;
+    }
+
+    .feedback-body {
+      margin-bottom: 12px;
+    }
+
+    .feedback-desc {
+      font-size: 15px;
+      line-height: 1.8;
+      color: #333;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .feedback-footer {
+      display: flex;
+      gap: 24px;
+      font-size: 13px;
+      color: #666;
+      flex-wrap: wrap;
+    }
+
+    .feedback-footer span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* 图片预览 */
+    .image-gallery {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .image-thumb {
+      width: 80px;
+      height: 80px;
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: pointer;
+      border: 1px solid #e0e0e0;
+    }
+
+    .image-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.2s;
+    }
+
+    .image-thumb:hover img {
+      transform: scale(1.05);
+    }
+
+    /* 图片放大弹窗 */
+    .image-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+    }
+
+    .image-modal.show {
+      display: flex;
+    }
+
+    .image-modal img {
+      max-width: 90%;
+      max-height: 90%;
+      object-fit: contain;
+    }
+
+    .image-modal .close-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .image-modal .nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 50px;
+      height: 50px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .image-modal .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .image-modal .nav-btn.prev {
+      left: 20px;
+    }
+
+    .image-modal .nav-btn.next {
+      right: 20px;
+    }
+
+    .image-modal .image-counter {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 8px 16px;
+      border-radius: 20px;
+    }
+
+    /* 分页 */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-top: 24px;
+      padding: 20px;
+    }
+
+    .pagination button {
+      padding: 8px 16px;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .pagination button:hover:not(:disabled) {
+      border-color: #1677ff;
+      color: #1677ff;
+    }
+
+    .pagination button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .pagination .page-info {
+      font-size: 14px;
+      color: #666;
+    }
+
+    /* 加载状态 */
+    .loading {
+      text-align: center;
+      padding: 60px;
+      color: #999;
+    }
+
+    .loading::after {
+      content: '';
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      margin-left: 8px;
+      border: 2px solid #d9d9d9;
+      border-top-color: #1677ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* 空状态 */
+    .empty-state {
+      text-align: center;
+      padding: 60px;
+      color: #999;
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+
+    /* 响应式 */
+    @media (max-width: 768px) {
+      .container {
+        padding: 16px;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .feedback-header {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- 密码弹窗 -->
+  <div class="password-modal" id="passwordModal">
+    <div class="password-box">
+      <h2>🔐 管理后台登录</h2>
+      <input type="password" id="passwordInput" placeholder="请输入管理密码" autofocus>
+      <button onclick="verifyPassword()">进入后台</button>
+      <div class="password-error" id="passwordError"></div>
+    </div>
+  </div>
+
+  <!-- 主内容 -->
+  <div class="container" id="mainContent" style="display: none;">
+    <div class="header">
+      <div class="header-actions">
+        <h1>📋 用户反馈管理</h1>
+        <button class="filter-btn" onclick="logout()">退出登录</button>
+      </div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card total">
+        <div class="stat-label">总反馈数</div>
+        <div class="stat-value" id="totalCount">-</div>
+      </div>
+      <div class="stat-card crash">
+        <div class="stat-label">崩溃</div>
+        <div class="stat-value" id="crashCount">-</div>
+      </div>
+      <div class="stat-card bug">
+        <div class="stat-label">功能异常</div>
+        <div class="stat-value" id="bugCount">-</div>
+      </div>
+      <div class="stat-card suggest">
+        <div class="stat-label">体验建议</div>
+        <div class="stat-value" id="suggestCount">-</div>
+      </div>
+      <div class="stat-card other">
+        <div class="stat-label">其他</div>
+        <div class="stat-value" id="otherCount">-</div>
+      </div>
+    </div>
+
+    <!-- 筛选器 -->
+    <div class="filter-bar">
+      <button class="filter-btn active" data-type="all" onclick="filterByType('all')">全部</button>
+      <button class="filter-btn" data-type="崩溃" onclick="filterByType('崩溃')">崩溃</button>
+      <button class="filter-btn" data-type="功能异常" onclick="filterByType('功能异常')">功能异常</button>
+      <button class="filter-btn" data-type="体验建议" onclick="filterByType('体验建议')">体验建议</button>
+      <button class="filter-btn" data-type="其他" onclick="filterByType('其他')">其他</button>
+      <button class="filter-btn" onclick="exportToExcel()" style="margin-left: auto; background: #52c41a; color: #fff; border-color: #52c41a;">📥 导出 Excel</button>
+    </div>
+
+    <!-- 反馈列表 -->
+    <div class="feedback-list" id="feedbackList">
+      <div class="loading">加载中</div>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <!-- 图片放大弹窗 -->
+  <div class="image-modal" id="imageModal">
+    <button class="close-btn" onclick="closeImageModal()">×</button>
+    <button class="nav-btn prev" onclick="navigateImage(-1)">‹</button>
+    <img src="" alt="放大图片" id="modalImage">
+    <button class="nav-btn next" onclick="navigateImage(1)">›</button>
+    <div class="image-counter" id="imageCounter"></div>
+  </div>
+
+  <script>
+    const API_BASE_URL = window.location.origin;
+    const PASSWORD_KEY = 'admin_password';
+
+    let currentPage = 1;
+    let currentFilter = 'all';
+    let currentImages = [];
+    let currentImageIndex = 0;
+
+    // 页面加载时检查密码
+    window.onload = function() {
+      const savedPassword = localStorage.getItem(PASSWORD_KEY);
+      if (savedPassword) {
+        verifyPassword(savedPassword);
+      }
+    };
+
+    // 密码输入框回车事件
+    document.getElementById('passwordInput').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        verifyPassword();
+      }
+    });
+
+    // 验证密码
+    async function verifyPassword(password) {
+      const inputPassword = password || document.getElementById('passwordInput').value;
+      const errorEl = document.getElementById('passwordError');
+
+      try {
+        // 先尝试获取统计数据验证密码
+        const response = await fetch(`${API_BASE_URL}/api/feedback/stats`, {
+          headers: { 'Admin-Password': inputPassword }
+        });
+
+        if (response.ok) {
+          // 密码正确
+          localStorage.setItem(PASSWORD_KEY, inputPassword);
+          document.getElementById('passwordModal').classList.add('hidden');
+          document.getElementById('mainContent').style.display = 'block';
+          loadStats(inputPassword);
+          loadFeedbackList(inputPassword);
+        } else {
+          errorEl.textContent = '密码错误，请重试';
+          localStorage.removeItem(PASSWORD_KEY);
+        }
+      } catch (error) {
+        errorEl.textContent = '验证失败，请检查网络';
+      }
+    }
+
+    // 加载统计数据
+    async function loadStats(pwd) {
+      try {
+        const password = pwd || localStorage.getItem(PASSWORD_KEY);
+        const response = await fetch(`${API_BASE_URL}/api/feedback/stats`, {
+          headers: { 'Admin-Password': password }
+        });
+
+        if (!response.ok) return;
+
+        const result = await response.json();
+        if (result.success) {
+          document.getElementById('totalCount').textContent = result.total || 0;
+          document.getElementById('crashCount').textContent = result.by_type['崩溃'] || 0;
+          document.getElementById('bugCount').textContent = result.by_type['功能异常'] || 0;
+          document.getElementById('suggestCount').textContent = result.by_type['体验建议'] || 0;
+          document.getElementById('otherCount').textContent = result.by_type['其他'] || 0;
+        }
+      } catch (error) {
+        console.error('加载统计失败:', error);
+      }
+    }
+
+    // 加载反馈列表
+    async function loadFeedbackList(pwd) {
+      const password = pwd || localStorage.getItem(PASSWORD_KEY);
+      const listEl = document.getElementById('feedbackList');
+      listEl.innerHTML = '<div class="loading">加载中</div>';
+
+      try {
+        let url = `${API_BASE_URL}/api/feedback/list?page=${currentPage}&page_size=20`;
+        if (currentFilter !== 'all') {
+          url += `&issue_type=${encodeURIComponent(currentFilter)}`;
+        }
+
+        const response = await fetch(url, {
+          headers: { 'Admin-Password': password }
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            localStorage.removeItem(PASSWORD_KEY);
+            location.reload();
+          }
+          return;
+        }
+
+        const result = await response.json();
+        if (result.success) {
+          renderFeedbackList(result.list);
+          renderPagination(result.total_pages, result.total);
+        }
+      } catch (error) {
+        console.error('加载列表失败:', error);
+        listEl.innerHTML = '<div class="empty-state">加载失败，请刷新重试</div>';
+      }
+    }
+
+    // 渲染反馈列表
+    function renderFeedbackList(list) {
+      const listEl = document.getElementById('feedbackList');
+
+      if (list.length === 0) {
+        listEl.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📭</div>
+            <div>暂无反馈数据</div>
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = list.map(item => `
+        <div class="feedback-item">
+          <div class="feedback-header">
+            <div class="feedback-meta">
+              <span class="type-tag ${getTypeClass(item.issue_type)}">${item.issue_type}</span>
+              <span class="feedback-time">${formatDateTime(item.created_at)}</span>
+            </div>
+          </div>
+          <div class="feedback-body">
+            <div class="feedback-desc">${escapeHtml(item.description)}</div>
+            ${renderImages(item.images)}
+          </div>
+          <div class="feedback-footer">
+            ${item.contact ? `<span>📞 ${escapeHtml(item.contact)}</span>` : ''}
+            ${item.device_info ? `<span>💻 ${escapeHtml(item.device_info.substring(0, 50))}${item.device_info.length > 50 ? '...' : ''}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      // 绑定图片点击事件
+      listEl.querySelectorAll('.image-thumb').forEach((thumb, index) => {
+        thumb.addEventListener('click', () => {
+          const allImages = [];
+          listEl.querySelectorAll('.image-thumb').forEach(t => {
+            allImages.push(t.dataset.src);
+          });
+          openImageModal(allImages, index);
+        });
+      });
+    }
+
+    // 渲染图片
+    function renderImages(images) {
+      if (!images || images.length === 0) return '';
+
+      return `
+        <div class="image-gallery">
+          ${images.map((img, index) => `
+            <div class="image-thumb" data-src="${API_BASE_URL}/data/uploads/${img}">
+              <img src="${API_BASE_URL}/data/uploads/${img}" alt="图片${index + 1}">
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // 打开图片弹窗
+    function openImageModal(images, index) {
+      currentImages = images;
+      currentImageIndex = index;
+      updateModalImage();
+      document.getElementById('imageModal').classList.add('show');
+      document.body.style.overflow = 'hidden';
+    }
+
+    // 关闭图片弹窗
+    function closeImageModal() {
+      document.getElementById('imageModal').classList.remove('show');
+      document.body.style.overflow = '';
+    }
+
+    // 切换图片
+    function navigateImage(direction) {
+      currentImageIndex += direction;
+      if (currentImageIndex < 0) currentImageIndex = currentImages.length - 1;
+      if (currentImageIndex >= currentImages.length) currentImageIndex = 0;
+      updateModalImage();
+    }
+
+    // 更新弹窗图片
+    function updateModalImage() {
+      document.getElementById('modalImage').src = currentImages[currentImageIndex];
+      document.getElementById('imageCounter').textContent =
+        `${currentImageIndex + 1} / ${currentImages.length}`;
+    }
+
+    // 点击弹窗背景关闭
+    document.getElementById('imageModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeImageModal();
+      }
+    });
+
+    // 键盘事件
+    document.addEventListener('keydown', function(e) {
+      if (!document.getElementById('imageModal').classList.contains('show')) return;
+
+      if (e.key === 'Escape') closeImageModal();
+      if (e.key === 'ArrowLeft') navigateImage(-1);
+      if (e.key === 'ArrowRight') navigateImage(1);
+    });
+
+    // 渲染分页
+    function renderPagination(totalPages, total) {
+      const paginationEl = document.getElementById('pagination');
+
+      if (totalPages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+      }
+
+      let html = `
+        <button onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>
+        <span class="page-info">第 ${currentPage} / ${totalPages} 页（共 ${total} 条）</span>
+        <button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>
+      `;
+
+      paginationEl.innerHTML = html;
+    }
+
+    // 切换页面
+    function goToPage(page) {
+      currentPage = page;
+      loadFeedbackList();
+    }
+
+    // 按类型筛选
+    function filterByType(type) {
+      currentFilter = type;
+      currentPage = 1;
+
+      // 更新按钮状态
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.type === type);
+      });
+
+      loadFeedbackList();
+    }
+
+    // 退出登录
+    function logout() {
+      localStorage.removeItem(PASSWORD_KEY);
+      location.reload();
+    }
+
+    // 导出 Excel
+    async function exportToExcel() {
+      const password = localStorage.getItem(PASSWORD_KEY);
+      if (!password) {
+        alert('请先登录');
+        return;
+      }
+
+      try {
+        let url = `${API_BASE_URL}/api/feedback/export?`;
+        if (currentFilter !== 'all') {
+          url += `issue_type=${encodeURIComponent(currentFilter)}`;
+        }
+
+        const response = await fetch(url, {
+          headers: { 'Admin-Password': password }
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            alert('密码已过期，请重新登录');
+            localStorage.removeItem(PASSWORD_KEY);
+            location.reload();
+          } else {
+            alert('导出失败');
+          }
+          return;
+        }
+
+        // 获取文件名
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'feedback_export.csv';
+        if (disposition) {
+          const match = disposition.match(/filename="(.+)"/);
+          if (match) filename = match[1];
+        }
+
+        // 下载文件
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+      } catch (error) {
+        console.error('导出失败:', error);
+        alert('导出失败，请重试');
+      }
+    }
+
+    // 辅助函数
+    function getTypeClass(type) {
+      const map = {
+        '崩溃': 'crash',
+        '功能异常': 'bug',
+        '体验建议': 'suggest',
+        '其他': 'other'
+      };
+      return map[type] || 'other';
+    }
+
+    function formatDateTime(dateStr) {
+      const date = new Date(dateStr);
+      const pad = n => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

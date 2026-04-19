@@ -414,10 +414,10 @@
     <div id="loginPage" class="form-card" style="display: none;">
       <div class="login-content">
         <div class="login-icon">🔐</div>
-        <h2 class="login-title">正在跳转到飞书登录...</h2>
-        <p class="login-desc">请在飞书中完成授权</p>
-        <button id="loginBtn" class="submit-btn" style="margin-top: 0; display: none;">
-          使用飞书登录
+        <h2 class="login-title">请先登录</h2>
+        <p class="login-desc">使用公司统一认证系统登录</p>
+        <button id="loginBtn" class="submit-btn" style="margin-top: 0;" onclick="window.location.href='/api/auth/login'">
+          立即登录
         </button>
       </div>
     </div>
@@ -431,7 +431,7 @@
         </div>
         <button class="logout-btn" onclick="logout()">退出登录</button>
       </div>
-      <form id="feedbackForm">
+      <form id="feedbackForm" enctype="multipart/form-data">
         <!-- 问题类型 -->
         <div class="form-group">
           <label class="form-label">
@@ -469,7 +469,7 @@
               placeholder="请详细描述您遇到的问题或建议..."
               maxlength="500"
             ></textarea>
-            <div class="image-upload-hint">支持粘贴截图或点击下方按钮上传图片</div>
+            <div class="image-upload-hint">支持粘贴截图或点击下方按钮上传图片（最多3张，单张10MB）</div>
           </div>
           <div class="char-count" id="charCount">0/500</div>
 
@@ -531,64 +531,61 @@
     const userAvatarEl = document.getElementById('userAvatar');
     const userNameEl = document.getElementById('userName');
 
-    // 图片数组
-    let uploadedImages = [];
+    // 图片文件数组
+    let uploadedFiles = [];
 
     // 检查登录状态
-    function checkLoginStatus() {
-      const openId = localStorage.getItem('feishu_openId');
-      const userName = localStorage.getItem('feishu_userName');
-      const userAvatar = localStorage.getItem('feishu_userAvatar');
+    async function checkLoginStatus() {
+      try {
+        console.log('[Debug] 正在检查登录状态...');
+        const response = await fetch(`${API_BASE_URL}/api/user/info`, {
+          credentials: 'include'
+        });
+        const result = await response.json();
+        console.log('[Debug] 登录状态响应:', result);
 
-      if (openId) {
-        loginPage.style.display = 'none';
-        formPage.style.display = 'block';
+        if (result.success && result.loggedIn) {
+          console.log('[Debug] 已登录，显示表单');
+          loginPage.style.display = 'none';
+          formPage.style.display = 'block';
 
-        // 显示用户信息
-        if (userName && userName !== '未知用户') {
-          userNameEl.textContent = userName;
+          // 显示用户信息
+          const displayName = result.employeeNo || result.outerMemberId || '已登录';
+          userNameEl.textContent = displayName;
+        } else {
+          console.log('[Debug] 未登录，跳转到toca授权页');
+          // 未登录，直接跳转到 toca 授权页
+          window.location.href = `${API_BASE_URL}/api/auth/login?t=${Date.now()}`;
         }
-        if (userAvatar) {
-          userAvatarEl.src = userAvatar;
-          userAvatarEl.style.display = 'block';
-        }
-      } else {
+      } catch (error) {
+        console.error('Check login status error:', error);
         loginPage.style.display = 'block';
         formPage.style.display = 'none';
-        // 自动跳转到飞书登录
-        setTimeout(() => {
-          login();
-        }, 500);
       }
     }
 
-    // 登录
-    async function login() {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/auth-url`);
-        const result = await response.json();
-        if (result.success && result.authUrl) {
-          window.location.href = result.authUrl;
-        } else {
-          showToast('获取登录链接失败', 'error');
-        }
-      } catch (error) {
-        console.error('Login error:', error);
-        showToast('网络错误，请重试', 'error');
-      }
+    // 登录 - 跳转到 toca 授权页面
+    function login() {
+      window.location.href = `${API_BASE_URL}/api/auth/login`;
     }
 
     // 退出登录
-    function logout() {
-      localStorage.removeItem('feishu_openId');
-      localStorage.removeItem('feishu_userName');
-      localStorage.removeItem('feishu_userAvatar');
-      // 重置用户信息显示
-      userNameEl.textContent = '✅ 已登录';
-      userAvatarEl.src = '';
-      userAvatarEl.style.display = 'none';
-      checkLoginStatus();
-      showToast('已退出登录', 'success');
+    async function logout() {
+      console.log('[Debug] 退出登录被点击 v2');
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'GET',
+          credentials: 'include'
+        });
+        console.log('[Debug] 退出状态:', response.status);
+        const result = await response.json();
+        console.log('[Debug] 退出响应:', result);
+        // 直接跳转到 toca 登录页
+        window.location.href = `${API_BASE_URL}/api/auth/login?t=${Date.now()}`;
+      } catch (error) {
+        console.error('Logout error:', error);
+        alert('退出失败: ' + error.message);
+      }
     }
 
     // 更新字数统计
@@ -651,31 +648,25 @@
         return;
       }
 
-      const openId = localStorage.getItem('feishu_openId');
-      if (!openId) {
-        showToast('请先登录', 'error');
-        checkLoginStatus();
-        return;
-      }
-
       setLoading(true);
 
-      const formData = {
-        openId: openId,
-        type: document.querySelector('input[name="type"]:checked').value,
-        description: description.value.trim(),
-        contact: document.getElementById('contact').value.trim(),
-        deviceInfo: getDeviceInfo(),
-        images: uploadedImages
-      };
+      // 使用 FormData 提交
+      const formData = new FormData();
+      formData.append('issue_type', document.querySelector('input[name="type"]:checked').value);
+      formData.append('description', description.value.trim());
+      formData.append('contact', document.getElementById('contact').value.trim());
+      formData.append('device_info', getDeviceInfo());
+
+      // 添加图片文件
+      uploadedFiles.forEach(file => {
+        formData.append('images', file);
+      });
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/submit`, {
+        const response = await fetch(`${API_BASE_URL}/api/feedback/submit`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(formData)
+          credentials: 'include',
+          body: formData
         });
 
         const result = await response.json();
@@ -683,16 +674,12 @@
         if (response.ok && result.success) {
           showToast('提交成功，感谢你的反馈！', 'success');
           form.reset();
-          uploadedImages = [];
+          uploadedFiles = [];
           renderImagePreviews();
           updateCharCount();
           checkFormValidity();
         } else if (response.status === 401) {
-          // Token 过期或无效
           showToast('登录已过期，请重新登录', 'error');
-          localStorage.removeItem('feishu_openId');
-          localStorage.removeItem('feishu_userName');
-          localStorage.removeItem('feishu_userAvatar');
           checkLoginStatus();
         } else {
           showToast(result.message || '提交失败，请重试', 'error');
@@ -712,36 +699,41 @@
           showToast('请选择图片文件', 'error');
           return;
         }
-        if (uploadedImages.length >= 5) {
-          showToast('最多上传5张图片', 'error');
+        if (uploadedFiles.length >= 3) {
+          showToast('最多上传3张图片', 'error');
+          return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          showToast('单张图片不能超过 10MB', 'error');
           return;
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const imageData = e.target.result;
-          uploadedImages.push(imageData);
-          renderImagePreviews();
-        };
-        reader.readAsDataURL(file);
+        uploadedFiles.push(file);
+        renderImagePreviews();
       });
     }
 
     function renderImagePreviews() {
-      imagePreviewList.innerHTML = uploadedImages.map((img, index) => `
-        <div class="image-preview-item">
-          <img src="${img}" alt="预览图${index + 1}">
-          <button type="button" class="remove-btn" data-index="${index}">×</button>
-        </div>
-      `).join('');
+      imagePreviewList.innerHTML = '';
 
-      // 绑定删除按钮事件
-      imagePreviewList.querySelectorAll('.remove-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const index = parseInt(e.target.dataset.index);
-          uploadedImages.splice(index, 1);
-          renderImagePreviews();
-        });
+      uploadedFiles.forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const div = document.createElement('div');
+          div.className = 'image-preview-item';
+          div.innerHTML = `
+            <img src="${e.target.result}" alt="预览图${index + 1}">
+            <button type="button" class="remove-btn" data-index="${index}">×</button>
+          `;
+          imagePreviewList.appendChild(div);
+
+          // 绑定删除按钮事件
+          div.querySelector('.remove-btn').addEventListener('click', () => {
+            uploadedFiles.splice(index, 1);
+            renderImagePreviews();
+          });
+        };
+        reader.readAsDataURL(file);
       });
     }
 
@@ -754,7 +746,9 @@
         if (items[i].type.startsWith('image/')) {
           hasImage = true;
           const file = items[i].getAsFile();
-          handleImageUpload([file]);
+          // 为粘贴的图片生成文件名
+          const newFile = new File([file], `pasted_${Date.now()}.png`, { type: file.type });
+          handleImageUpload([newFile]);
         }
       }
 
