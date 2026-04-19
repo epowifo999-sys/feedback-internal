@@ -94,9 +94,16 @@ function initDatabase() {
       images TEXT,
       device_info TEXT,
       user_id TEXT,
+      user_name TEXT DEFAULT '',
+      status TEXT DEFAULT '收集中',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // 为旧数据添加新字段
+  db.run(`ALTER TABLE feedback ADD COLUMN user_name TEXT DEFAULT ''`, () => {});
+  db.run(`ALTER TABLE feedback ADD COLUMN status TEXT DEFAULT '收集中'`, () => {});
+  db.run(`ALTER TABLE feedback ADD COLUMN space TEXT DEFAULT ''`, () => {});
 
   console.log(`[${formatDate()}] 数据库初始化完成: ${dbPath}`);
 }
@@ -308,6 +315,63 @@ async function refreshTocaUserToken(refreshToken) {
   return response.data.data;
 }
 
+async function fetchMemberName(sessionId, employeeNo) {
+  try {
+    const spaceToken = await getTocaSpaceToken();
+    console.log(`[${formatDate()}] 使用 spaceToken: ${spaceToken ? spaceToken.slice(0, 30) + '...' : 'null'}`);
+    const body = JSON.stringify({
+      employeeNos: [employeeNo],
+      includeMemberDeptData: false,
+      includeCustomData: false
+    });
+    // 先用 spaceToken + Bearer，失败则用 appToken + Bearer
+    let token = await getTocaSpaceToken();
+    let resp = await request({
+      method: 'POST',
+      protocol: 'http:',
+      hostname: 'toca.17u.cn',
+      path: '/open-api/uic-apis/member/list-by-employee-nos',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, body);
+    console.log(`[${formatDate()}] 查询姓名(spaceToken+Bearer) status=${resp.status}`);
+
+    if (resp.status === 401) {
+      const appToken = await getTocaAppToken();
+      resp = await request({
+        method: 'POST',
+        protocol: 'http:',
+        hostname: 'toca.17u.cn',
+        path: '/open-api/uic-apis/member/list-by-employee-nos',
+        headers: {
+          'Authorization': `Bearer ${appToken}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      }, body);
+      console.log(`[${formatDate()}] 查询姓名(appToken+Bearer) status=${resp.status}`);
+    }
+
+    console.log(`[${formatDate()}] 查询姓名接口 status=${resp.status}, data=${JSON.stringify(resp.data).slice(0, 500)}`);
+
+    const session = userSessions.get(sessionId);
+    if (!session) return;
+
+    if (resp.data && typeof resp.data === 'object' && resp.data.data && Array.isArray(resp.data.data) && resp.data.data.length > 0) {
+      const memberName = resp.data.data[0].memberName || '';
+      session.memberName = memberName;
+      console.log(`[${formatDate()}] 查询用户姓名成功: ${memberName}（${employeeNo}）`);
+    } else {
+      console.log(`[${formatDate()}] 查询用户姓名返回空，降级显示工号: ${employeeNo}`);
+    }
+  } catch (e) {
+    console.error(`[${formatDate()}] 查询用户姓名失败:`, e.message);
+  }
+}
+
 async function checkAndRefreshUserToken(sessionId) {
   const session = userSessions.get(sessionId);
   if (!session) return null;
@@ -425,17 +489,26 @@ async function handleTocaCallback(req, res) {
     const userData = response.data.data;
     const sessionId = generateUUID();
 
+    console.log(`[${formatDate()}] toca 用户数据: ${JSON.stringify(userData)}`);
+
     userSessions.set(sessionId, {
       openId: userData.openId,
       outerMemberId: userData.outerMemberId,
       employeeNo: userData.employeeNo,
+      name: userData.name || '',
+      memberName: '',
       userAccessToken: userData.userAccessToken,
       refreshToken: userData.refreshToken,
       accessTokenExpireInTimestamp: userData.accessTokenExpireInTimestamp * 1000,
       loginTime: Date.now()
     });
 
-    console.log(`[${formatDate()}] 用户登录成功: ${userData.employeeNo || userData.openId}`);
+    // 异步查询用户姓名，写入 session
+    if (userData.employeeNo) {
+      fetchMemberName(sessionId, userData.employeeNo);
+    }
+
+    console.log(`[${formatDate()}] 用户登录成功: ${userData.name || ''} ${userData.employeeNo || userData.openId}`);
 
     const isLocalhost = CONFIG.TOCA_REDIRECT_URI.includes('localhost');
     const cookieOptions = isLocalhost
@@ -538,7 +611,8 @@ async function handleGetUserInfo(req, res) {
       loggedIn: true,
       openId: session.openId,
       employeeNo: session.employeeNo,
-      outerMemberId: session.outerMemberId
+      outerMemberId: session.outerMemberId,
+      name: session.name || ''
     });
 
   } catch (error) {
@@ -590,7 +664,7 @@ function handleSubmit(req, res) {
       return sendError(res, err.message || '文件上传失败', 400);
     }
 
-    const { issue_type, description, contact, device_info } = req.body;
+    const { issue_type, description, contact, device_info, space } = req.body;
 
     // 参数校验
     if (!issue_type || !description) {
@@ -607,10 +681,16 @@ function handleSubmit(req, res) {
     const imagePaths = req.files ? req.files.map(f => f.filename) : [];
 
     // 写入数据库
+    const userName = session.memberName
+      ? `${session.memberName}（${session.employeeNo}）`
+      : session.name
+        ? (session.employeeNo ? `${session.name}（${session.employeeNo}）` : session.name)
+        : (session.employeeNo || session.outerMemberId || '');
+
     db.run(
-      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId],
+      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, space)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId, userName, space || ''],
       function(err) {
         if (err) {
           console.error(`[${formatDate()}] 数据库写入失败:`, err);
@@ -642,20 +722,50 @@ function handleList(req, res) {
   const query = parsedUrl.query;
 
   const issueType = query.issue_type;
+  const status = query.status;
+  const space = query.space;
+  const startDate = query.start_date;
+  const endDate = query.end_date;
   const page = parseInt(query.page) || 1;
   const pageSize = Math.min(parseInt(query.page_size) || 20, 100);
   const offset = (page - 1) * pageSize;
 
   // 构建查询条件
-  let whereClause = '';
+  let conditions = [];
   let countParams = [];
   let queryParams = [];
 
   if (issueType && issueType !== 'all') {
-    whereClause = 'WHERE issue_type = ?';
+    conditions.push('issue_type = ?');
     countParams.push(issueType);
     queryParams.push(issueType);
   }
+
+  if (status && status !== 'all') {
+    conditions.push('status = ?');
+    countParams.push(status);
+    queryParams.push(status);
+  }
+
+  if (space && space !== 'all') {
+    conditions.push('space = ?');
+    countParams.push(space);
+    queryParams.push(space);
+  }
+
+  if (startDate) {
+    conditions.push('created_at >= ?');
+    countParams.push(startDate + ' 00:00:00');
+    queryParams.push(startDate + ' 00:00:00');
+  }
+
+  if (endDate) {
+    conditions.push('created_at <= ?');
+    countParams.push(endDate + ' 23:59:59');
+    queryParams.push(endDate + ' 23:59:59');
+  }
+
+  const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
   // 查询总数
   const countSql = `SELECT COUNT(*) as total FROM feedback ${whereClause}`;
@@ -721,7 +831,19 @@ function handleStats(req, res) {
         stats.total += row.count;
       });
 
-      sendSuccess(res, stats);
+      // 按状态统计
+      db.all(
+        `SELECT status, COUNT(*) as count FROM feedback GROUP BY status`,
+        (err2, statusRows) => {
+          if (!err2) {
+            stats.by_status = {};
+            statusRows.forEach(row => {
+              stats.by_status[row.status] = row.count;
+            });
+          }
+          sendSuccess(res, stats);
+        }
+      );
     }
   );
 }
@@ -737,15 +859,41 @@ function handleExport(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
   const issueType = query.issue_type;
+  const status = query.status;
+  const space = query.space;
+  const startDate = query.start_date;
+  const endDate = query.end_date;
 
   // 构建查询条件
-  let whereClause = '';
+  let conditions = [];
   let queryParams = [];
 
   if (issueType && issueType !== 'all') {
-    whereClause = 'WHERE issue_type = ?';
+    conditions.push('issue_type = ?');
     queryParams.push(issueType);
   }
+
+  if (status && status !== 'all') {
+    conditions.push('status = ?');
+    queryParams.push(status);
+  }
+
+  if (space && space !== 'all') {
+    conditions.push('space = ?');
+    queryParams.push(space);
+  }
+
+  if (startDate) {
+    conditions.push('created_at >= ?');
+    queryParams.push(startDate + ' 00:00:00');
+  }
+
+  if (endDate) {
+    conditions.push('created_at <= ?');
+    queryParams.push(endDate + ' 23:59:59');
+  }
+
+  const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
   // 查询所有数据（不分页）
   const sql = `SELECT * FROM feedback ${whereClause} ORDER BY created_at DESC`;
@@ -757,7 +905,7 @@ function handleExport(req, res) {
     }
 
     // 生成 CSV 内容
-    const headers = ['ID', '问题类型', '问题描述', '联系方式', '图片链接', '设备信息', '提交时间'];
+    const headers = ['ID', '问题类型', '问题描述', '联系方式', '提交人', '所属空间', '当前状态', '图片链接', '设备信息', '提交时间'];
     let csvContent = headers.join(',') + '\n';
 
     rows.forEach(row => {
@@ -767,6 +915,9 @@ function handleExport(req, res) {
         escapeCsv(row.issue_type),
         escapeCsv(row.description),
         escapeCsv(row.contact || ''),
+        escapeCsv(row.user_name || ''),
+        escapeCsv(row.space || ''),
+        escapeCsv(row.status || '收集中'),
         escapeCsv(images),
         escapeCsv(row.device_info || ''),
         row.created_at
@@ -802,6 +953,51 @@ function escapeCsv(value) {
     return '"' + str.replace(/"/g, '""') + '"';
   }
   return str;
+}
+
+// ==================== 状态更新接口 ====================
+function handleUpdateStatus(req, res) {
+  // 密码校验
+  const adminPassword = req.headers['admin-password'];
+  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
+    return sendError(res, '密码错误', 401);
+  }
+
+  // 读取请求体
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', () => {
+    try {
+      const data = JSON.parse(body);
+      const { id, status } = data;
+
+      if (!id || !status) {
+        return sendError(res, '参数缺失', 400);
+      }
+
+      const validStatuses = ['收集中', '解决中', '已解决'];
+      if (!validStatuses.includes(status)) {
+        return sendError(res, '无效的状态值', 400);
+      }
+
+      db.run(
+        'UPDATE feedback SET status = ? WHERE id = ?',
+        [status, id],
+        function(err) {
+          if (err) {
+            console.error(`[${formatDate()}] 状态更新失败:`, err);
+            return sendError(res, '更新失败');
+          }
+          if (this.changes === 0) {
+            return sendError(res, '记录不存在', 404);
+          }
+          sendSuccess(res, { message: '状态更新成功' });
+        }
+      );
+    } catch (e) {
+      sendError(res, '请求格式错误', 400);
+    }
+  });
 }
 
 // ==================== 主服务器 ====================
@@ -853,6 +1049,11 @@ const server = http.createServer(async (req, res) => {
     // 导出接口
     if (pathname === '/api/feedback/export' && req.method === 'GET') {
       return handleExport(req, res);
+    }
+
+    // 状态更新接口
+    if (pathname === '/api/feedback/update-status' && req.method === 'POST') {
+      return handleUpdateStatus(req, res);
     }
 
     // 图片访问路由
