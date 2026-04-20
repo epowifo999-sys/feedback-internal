@@ -910,7 +910,7 @@ table.tbl {
   function parseUserName(raw) {
     if (!raw) return { name: '匿名', employeeNo: '', display: '匿名', initial: '匿' };
     const m = raw.match(/^(.+?)（(\d+)）$/);
-    if (m) return { name: m[1], employeeNo: m[2], display: `${m[1]} ${m[2]}`, initial: m[1][0] };
+    if (m) return { name: m[1], employeeNo: m[2], display: `${m[1]}（${m[2]}）`, initial: m[1][0] };
     return { name: raw, employeeNo: '', display: raw, initial: raw[0] };
   }
 

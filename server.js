@@ -52,6 +52,13 @@ const CONFIG = {
   TOCA_OAUTH_AUTHORIZE_URL: 'http://toca.17u.cn/oauth/authorize',
   TOCA_GET_USER_BY_AUTH_CODE_URL: 'http://toca.17u.cn/open-api/oauth/getUserByAuthCode',
   TOCA_REFRESH_USER_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/v2/user-token/refresh',
+
+  // ===== toca IM 通知配置 =====
+  TOCA_NOTIFY_USER_ID: '1223489',   // 接收通知的用户ID（工号或memberUniqueId）
+  TOCA_NOTIFY_USER_TYPE: 2,          // 2=工号 4=memberUniqueId
+
+  // ===== 管理后台地址 =====
+  ADMIN_URL: 'http://localhost:3001/admin.html',
 };
 
 // toca Token 缓存
@@ -165,6 +172,16 @@ function request(options, data = null) {
 
 function generateUUID() {
   return crypto.randomUUID();
+}
+
+function extractUserIdFromToken(token) {
+  try {
+    const payload = token.split('.')[1];
+    const decoded = JSON.parse(Buffer.from(payload, 'base64').toString());
+    return decoded.userId || '';
+  } catch (e) {
+    return '';
+  }
 }
 
 function formatDate(date = new Date()) {
@@ -299,6 +316,117 @@ async function initTocaTokens() {
   }
 }
 
+// 每 110 分钟刷新 spaceToken
+setInterval(async () => {
+  try {
+    await getTocaSpaceToken();
+    console.log(`[${formatDate()}] toca spaceToken 自动刷新完成`);
+  } catch (error) {
+    console.error(`[${formatDate()}] toca spaceToken 自动刷新失败:`, error.message);
+  }
+}, 110 * 60 * 1000);
+
+// 发送 toca IM 通知
+async function sendTocaNotification({ issue_type, description, memberName, outerMemberId, employeeNo, space }) {
+  if (!CONFIG.TOCA_NOTIFY_USER_ID) return;
+
+  try {
+    const spaceToken = await getTocaSpaceToken();
+
+    const displayName = memberName || outerMemberId || '';
+    // TODO: 待接入表单空间字段后替换
+    const spaceName = space || '待确认';
+    const desc = (description || '').length > 100
+      ? (description || '').substring(0, 100) + '…'
+      : (description || '');
+
+    const cardContent = JSON.stringify({
+      notify_title: '贴心 Claw 收到一条新用户反馈',
+      ext_display: `${issue_type} - ${desc}`,
+      conversation_display: `${issue_type} - ${desc}`,
+      card: {
+        customizeHeader: {
+          title: {
+            tag: 'lark_md',
+            content: '贴心 Claw 新用户反馈通知'
+          },
+          type: 'default'
+        },
+        elements: [
+          {
+            tag: 'div',
+            text: {
+              tag: 'plain_text',
+              content: `反馈用户：${displayName}（${employeeNo}）`
+            }
+          },
+          {
+            tag: 'div',
+            text: {
+              tag: 'plain_text',
+              content: `所属空间：${spaceName}`
+            }
+          },
+          {
+            tag: 'div',
+            text: {
+              tag: 'plain_text',
+              content: `问题类型：${issue_type}`
+            }
+          },
+          {
+            tag: 'div',
+            text: {
+              tag: 'plain_text',
+              content: `问题描述：${desc}`
+            }
+          },
+          ...(CONFIG.ADMIN_URL ? [{
+            tag: 'action',
+            actions: [{
+              tag: 'button',
+              text: {
+                tag: 'lark_md',
+                content: '查看详情'
+              },
+              url: CONFIG.ADMIN_URL,
+              type: 'default',
+              destination: 'external',
+              loading: true
+            }]
+          }] : [])
+        ]
+      }
+    });
+
+    const resp = await request({
+      method: 'POST',
+      hostname: 'toca.17u.cn',
+      path: '/open-api/msg/v1/msg/bot/send',
+      headers: {
+        'Authorization': spaceToken,
+        'Content-Type': 'application/json'
+      }
+    }, {
+      requestId: Date.now(),
+      to: CONFIG.TOCA_NOTIFY_USER_ID,
+      msgType: 1,
+      version: '1.0.0',
+      content: cardContent,
+      pushContent: '贴心 Claw 收到一条新用户反馈',
+      userType: CONFIG.TOCA_NOTIFY_USER_TYPE
+    });
+
+    if (resp.data && resp.data.success) {
+      console.log(`[${formatDate()}] toca IM 通知推送成功`);
+    } else {
+      console.error(`[${formatDate()}] toca IM 通知推送失败: code=${resp.data?.code}, message=${resp.data?.message}`);
+    }
+  } catch (e) {
+    console.error(`[${formatDate()}] toca IM 通知推送异常:`, e.message);
+  }
+}
+
 async function refreshTocaUserToken(refreshToken) {
   const response = await request({
     method: 'POST',
@@ -315,61 +443,39 @@ async function refreshTocaUserToken(refreshToken) {
   return response.data.data;
 }
 
-async function fetchMemberName(sessionId, employeeNo) {
+async function fetchMemberName(sessionId) {
   try {
-    const spaceToken = await getTocaSpaceToken();
-    console.log(`[${formatDate()}] 使用 spaceToken: ${spaceToken ? spaceToken.slice(0, 30) + '...' : 'null'}`);
-    const body = JSON.stringify({
-      employeeNos: [employeeNo],
-      includeMemberDeptData: false,
-      includeCustomData: false
-    });
-    // 先用 spaceToken + Bearer，失败则用 appToken + Bearer
-    let token = await getTocaSpaceToken();
-    let resp = await request({
-      method: 'POST',
-      protocol: 'http:',
-      hostname: 'toca.17u.cn',
-      path: '/open-api/uic-apis/member/list-by-employee-nos',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    }, body);
-    console.log(`[${formatDate()}] 查询姓名(spaceToken+Bearer) status=${resp.status}`);
-
-    if (resp.status === 401) {
-      const appToken = await getTocaAppToken();
-      resp = await request({
-        method: 'POST',
-        protocol: 'http:',
-        hostname: 'toca.17u.cn',
-        path: '/open-api/uic-apis/member/list-by-employee-nos',
-        headers: {
-          'Authorization': `Bearer ${appToken}`,
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
-        }
-      }, body);
-      console.log(`[${formatDate()}] 查询姓名(appToken+Bearer) status=${resp.status}`);
-    }
-
-    console.log(`[${formatDate()}] 查询姓名接口 status=${resp.status}, data=${JSON.stringify(resp.data).slice(0, 500)}`);
-
     const session = userSessions.get(sessionId);
-    if (!session) return;
-
-    if (resp.data && typeof resp.data === 'object' && resp.data.data && Array.isArray(resp.data.data) && resp.data.data.length > 0) {
-      const memberName = resp.data.data[0].memberName || '';
-      session.memberName = memberName;
-      console.log(`[${formatDate()}] 查询用户姓名成功: ${memberName}（${employeeNo}）`);
-    } else {
-      console.log(`[${formatDate()}] 查询用户姓名返回空，降级显示工号: ${employeeNo}`);
+    if (!session || !session.tocaUserId) {
+      console.log(`[${formatDate()}] 查询用户姓名跳过: session 或 tocaUserId 不存在`);
+      return '';
     }
+
+    const appToken = await getTocaAppToken();
+    const resp = await request({
+      method: 'GET',
+      hostname: 'toca.17u.cn',
+      path: `/open-api/uic/user?spaceId=${CONFIG.TOCA_SPACE_ID}&userId=${session.tocaUserId}`,
+      headers: {
+        'Authorization': appToken
+      }
+    });
+
+    console.log(`[${formatDate()}] 查询用户姓名返回: ${JSON.stringify(resp.data)}`);
+
+    if (resp.data && resp.data.success && resp.data.data) {
+      const memberName = resp.data.data.memberName || '';
+      if (memberName) {
+        session.memberName = memberName;
+        console.log(`[${formatDate()}] 查询用户姓名成功: ${memberName}（${session.employeeNo}）`);
+        return memberName;
+      }
+    }
+    console.log(`[${formatDate()}] 查询用户姓名返回空，降级显示: ${session.outerMemberId || session.employeeNo}`);
   } catch (e) {
     console.error(`[${formatDate()}] 查询用户姓名失败:`, e.message);
   }
+  return '';
 }
 
 async function checkAndRefreshUserToken(sessionId) {
@@ -489,13 +595,16 @@ async function handleTocaCallback(req, res) {
     const userData = response.data.data;
     const sessionId = generateUUID();
 
-    console.log(`[${formatDate()}] toca 用户数据: ${JSON.stringify(userData)}`);
+    console.log(`[${formatDate()}] toca 用户数据(完整): ${JSON.stringify(userData)}`);
+    console.log(`[${formatDate()}] toca 用户数据字段: ${Object.keys(userData).join(', ')}`);
+    console.log(`[${formatDate()}] userData.name=${userData.name}, userData.memberName=${userData.memberName}, userData.nickName=${userData.nickName}, userData.userName=${userData.userName}`);
 
     userSessions.set(sessionId, {
       openId: userData.openId,
       outerMemberId: userData.outerMemberId,
       employeeNo: userData.employeeNo,
-      name: userData.name || '',
+      tocaUserId: extractUserIdFromToken(userData.userAccessToken),
+      name: userData.name || userData.memberName || userData.nickName || userData.userName || '',
       memberName: '',
       userAccessToken: userData.userAccessToken,
       refreshToken: userData.refreshToken,
@@ -504,9 +613,7 @@ async function handleTocaCallback(req, res) {
     });
 
     // 异步查询用户姓名，写入 session
-    if (userData.employeeNo) {
-      fetchMemberName(sessionId, userData.employeeNo);
-    }
+    fetchMemberName(sessionId);
 
     console.log(`[${formatDate()}] 用户登录成功: ${userData.name || ''} ${userData.employeeNo || userData.openId}`);
 
@@ -621,7 +728,7 @@ async function handleGetUserInfo(req, res) {
 }
 
 // ==================== 反馈提交接口 ====================
-function handleSubmit(req, res) {
+async function handleSubmit(req, res) {
   // 获取客户端 IP
   const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
@@ -651,7 +758,7 @@ function handleSubmit(req, res) {
   const session = userSessions.get(sessionId);
 
   // 使用 multer 处理文件上传
-  upload.array('images', 3)(req, res, (err) => {
+  upload.array('images', 3)(req, res, async (err) => {
     if (err) {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
@@ -680,12 +787,17 @@ function handleSubmit(req, res) {
     // 收集图片路径
     const imagePaths = req.files ? req.files.map(f => f.filename) : [];
 
-    // 写入数据库
+    // 如果 session 中没有姓名，同步查询一次
+    if (!session.memberName) {
+      await fetchMemberName(cookies.sessionId);
+    }
+
+    // 写入数据库：优先 memberName > outerMemberId > employeeNo
     const userName = session.memberName
-      ? `${session.memberName}（${session.employeeNo}）`
-      : session.name
-        ? (session.employeeNo ? `${session.name}（${session.employeeNo}）` : session.name)
-        : (session.employeeNo || session.outerMemberId || '');
+      ? (session.employeeNo ? `${session.memberName}（${session.employeeNo}）` : session.memberName)
+      : session.outerMemberId
+        ? (session.employeeNo ? `${session.outerMemberId}（${session.employeeNo}）` : session.outerMemberId)
+        : (session.employeeNo || '');
 
     db.run(
       `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, space)
@@ -704,6 +816,17 @@ function handleSubmit(req, res) {
         }
 
         console.log(`[${formatDate()}] 反馈提交成功: id=${this.lastID}, type=${issue_type}`);
+
+        // 异步推送 toca IM 通知
+        sendTocaNotification({
+          issue_type,
+          description,
+          memberName: session.memberName,
+          outerMemberId: session.outerMemberId,
+          employeeNo: session.employeeNo,
+          space: space || ''
+        });
+
         sendSuccess(res, { id: this.lastID, message: '提交成功' });
       }
     );

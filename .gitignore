@@ -1,0 +1,15 @@
+# 忽略依赖包目录（绝对不能传！）
+node_modules/
+
+# 忽略本地数据库文件（避免覆盖线上数据）
+*.db
+feedback.db
+
+# 忽略用户上传的测试图片目录
+data/uploads/
+
+# 忽略 Mac 系统自动生成的隐藏文件
+.DS_Store
+
+# 忽略 Claude 本地配置文件
+.claude/
