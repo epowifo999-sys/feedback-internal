@@ -3,6 +3,9 @@
  * 使用 SQLite 本地存储反馈数据
  */
 
+// 加载环境变量
+require('dotenv').config();
+
 const http = require('http');
 const https = require('https');
 const url = require('url');
@@ -29,10 +32,13 @@ try {
 // ==================== 配置项 ====================
 const CONFIG = {
   // 服务端口号
-  PORT: 3001,
+  PORT: parseInt(process.env.SERVER_PORT || '3001', 10),
+
+  // 服务绑定地址
+  HOST: process.env.HOST || 'localhost',
 
   // 管理后台密码
-  ADMIN_PASSWORD: 'admin123',
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123',
 
   // 数据目录
   DATA_DIR: './data',
@@ -43,7 +49,7 @@ const CONFIG = {
   TOCA_APP_SECRET: '44hJy469uvNKjrUwwFG2rcRoERzB5cF4',
   TOCA_SPACE_ID: '0583d',
 
-  TOCA_REDIRECT_URI: 'http://localhost:3001/api/auth/callback',
+  TOCA_REDIRECT_URI: process.env.TOCA_REDIRECT_URI || 'http://localhost:3001/api/auth/callback',
   TOCA_AGENT_ID: 'H0DCwsLcUaveHq8uL3',
 
   TOCA_BASE_URL: 'http://toca.17u.cn',
@@ -58,7 +64,10 @@ const CONFIG = {
   TOCA_NOTIFY_USER_TYPE: 2,          // 2=工号 4=memberUniqueId
 
   // ===== 管理后台地址 =====
-  ADMIN_URL: 'http://localhost:3001/admin.html',
+  ADMIN_URL: process.env.ADMIN_URL || 'http://localhost:3001/admin.html',
+
+  // ===== CORS 配置 =====
+  CORS_ALLOWED_ORIGINS: (process.env.CORS_ALLOWED_ORIGINS || '*').split(',').map(s => s.trim()),
 };
 
 // toca Token 缓存
@@ -190,6 +199,17 @@ function formatDate(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
          `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * 根据请求 Origin 匹配 CORS 白名单
+ */
+function resolveCorsOrigins(req) {
+  const origins = CONFIG.CORS_ALLOWED_ORIGINS;
+  if (origins.includes('*')) return '*';
+  const origin = req.headers.origin;
+  if (origin && origins.includes(origin)) return origin;
+  return origins[0] || '*';
 }
 
 function setCORS(res, allowedOrigin = '*') {
@@ -670,10 +690,10 @@ async function handleTocaCallback(req, res) {
 
     console.log(`[${formatDate()}] 用户登录成功: ${userData.name || ''} ${userData.employeeNo || userData.openId}`);
 
-    const isLocalhost = CONFIG.TOCA_REDIRECT_URI.includes('localhost');
-    const cookieOptions = isLocalhost
-      ? `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=Lax`
-      : `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=None; Secure`;
+    const isHttps = CONFIG.HOST !== 'localhost' && !CONFIG.HOST.includes('127.0.0.1') && process.env.NODE_ENV === 'production';
+    const cookieOptions = isHttps
+      ? `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=None; Secure`
+      : `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=Lax`;
 
     res.writeHead(302, {
       'Location': '/',
@@ -1192,7 +1212,7 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-  setCORS(res, '*');
+  setCORS(res, resolveCorsOrigins(req));
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -1293,9 +1313,9 @@ server.listen(CONFIG.PORT, async () => {
   console.log('='.repeat(50));
   console.log('用户反馈服务已启动');
   console.log('='.repeat(50));
-  console.log(`访问地址: http://localhost:${CONFIG.PORT}`);
-  console.log(`登录地址: http://localhost:${CONFIG.PORT}/api/auth/login`);
-  console.log(`管理后台: http://localhost:${CONFIG.PORT}/admin.html`);
+  console.log(`访问地址: http://${CONFIG.HOST}:${CONFIG.PORT}`);
+  console.log(`登录地址: http://${CONFIG.HOST}:${CONFIG.PORT}/api/auth/login`);
+  console.log(`管理后台: http://${CONFIG.HOST}:${CONFIG.PORT}/admin.html`);
   console.log('='.repeat(50));
 
   // 初始化数据库

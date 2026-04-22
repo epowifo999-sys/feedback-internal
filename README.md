@@ -48,7 +48,7 @@ http://你的域名/api/auth/callback
 
 本地开发时可使用：
 ```
-http://localhost:3000/api/auth/callback
+http://localhost:3001/api/auth/callback
 ```
 
 ### 2. 配置飞书应用（表格和IM通知）
@@ -163,9 +163,9 @@ node server.js
 ==================================================
 用户反馈服务已启动
 ==================================================
-访问地址: http://localhost:3000
-登录地址: http://localhost:3000/api/auth/login
-API 接口: http://localhost:3000/api/submit
+访问地址: http://localhost:3001
+登录地址: http://localhost:3001/api/auth/login
+API 接口: http://localhost:3001/api/submit
 ==================================================
 请确保已配置 toca 应用信息:
   - TOCA_APP_KEY: 已配置 ✓
@@ -183,7 +183,7 @@ API 接口: http://localhost:3000/api/submit
 
 #### 4.3 访问页面
 
-1. 在浏览器中打开：`http://localhost:3000`
+1. 在浏览器中打开：`http://localhost:3001`
 2. 点击「立即登录」跳转到 toca 认证页面
 3. 完成登录后自动返回反馈页面
 
@@ -342,7 +342,7 @@ server {
     server_name feedback.example.com;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
