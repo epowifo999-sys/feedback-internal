@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>贴心Claw后台</title>
+<title>反馈管理后台</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -94,98 +94,7 @@ button { font-family: inherit; }
 ::-webkit-scrollbar-thumb:hover { background: oklch(0.78 0.012 75); }
 ::-webkit-scrollbar-track { background: transparent; }
 
-body { min-height: 100vh; display: flex; flex-direction: column; }
-
-/* ---------- 整体布局 ---------- */
-.app-layout {
-  display: flex; flex: 1; min-height: 0;
-}
-
-/* ---------- 侧边导航 ---------- */
-.sidebar {
-  width: 220px;
-  min-height: calc(100vh - 53px);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex; flex-direction: column;
-  transition: width var(--dur-slow) var(--ease-out);
-  flex-shrink: 0;
-  position: relative;
-  z-index: 10;
-}
-.sidebar.collapsed { width: 52px; }
-
-/* 悬浮折叠按钮 */
-.sidebar-toggle-float {
-  position: absolute;
-  top: 16px;
-  right: -13px;
-  z-index: 20;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur) var(--ease);
-}
-.sidebar:hover .sidebar-toggle-float,
-.sidebar-toggle-float:hover {
-  opacity: 1;
-  pointer-events: auto;
-}
-.toggle-float-btn {
-  width: 26px; height: 26px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  color: var(--ink-3);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all var(--dur) var(--ease);
-  position: relative;
-}
-.toggle-float-btn:hover { background: var(--surface-hover); color: var(--ink); border-color: var(--border-strong); }
-.toggle-float-btn svg { width: 13px; height: 13px; transition: transform var(--dur-slow) var(--ease-out); }
-.sidebar.collapsed .toggle-float-btn svg { transform: rotate(180deg); }
-
-/* Tooltip */
-.toggle-float-btn::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: calc(100% + 10px);
-  top: 50%; transform: translateY(-50%);
-  background: var(--ink);
-  color: #fff;
-  font-size: 12px;
-  padding: 4px 10px;
-  border-radius: var(--r-sm);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur) var(--ease);
-  font-family: var(--font-sans);
-}
-.toggle-float-btn:hover::after { opacity: 1; }
-
-.sidebar-nav { padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
-
-.nav-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--r-md);
-  cursor: pointer;
-  font-size: 13.5px; color: var(--ink-2);
-  transition: all var(--dur) var(--ease);
-  white-space: nowrap; overflow: hidden;
-  border: 0; background: transparent; font-family: inherit;
-  width: 100%; text-align: left;
-}
-.nav-item:hover { background: var(--surface-hover); color: var(--ink); }
-.nav-item.active { background: var(--brand-soft); color: var(--brand-ink); font-weight: 500; }
-.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
-.nav-item .nav-label { transition: opacity var(--dur) var(--ease); opacity: 1; }
-.sidebar.collapsed .nav-item .nav-label { opacity: 0; width: 0; overflow: hidden; }
-
-/* ---------- 主内容区 ---------- */
-.main-area { flex: 1; min-width: 0; overflow-x: auto; }
+body { min-height: 100vh; }
 
 /* ---------- 密码弹窗 ---------- */
 .pw-modal {
@@ -474,21 +383,20 @@ table.tbl {
   position: relative; display: inline-block;
 }
 .status-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 10px; border: 1px solid transparent;
-  border-radius: var(--r-sm); cursor: pointer;
-  font-size: 12px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px 3px 10px; border: 1px solid transparent;
+  border-radius: 999px; cursor: pointer;
+  font-size: 11.5px; font-weight: 500;
   font-family: inherit;
   background: transparent;
   transition: all var(--dur) var(--ease);
-  white-space: nowrap;
 }
-.status-btn::before { content:""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-.status-btn svg { width: 10px; height: 10px; color: var(--ink-4); margin-left: 2px; }
-.status-btn:hover { filter: brightness(0.95); }
-.status-btn.collecting { color: oklch(0.38 0.11 240); background: var(--info-soft); border-color: oklch(0.82 0.06 240); }
-.status-btn.resolving { color: oklch(0.42 0.13 75); background: var(--warn-soft); border-color: oklch(0.84 0.08 75); }
-.status-btn.resolved { color: oklch(0.36 0.12 155); background: var(--success-soft); border-color: oklch(0.82 0.07 155); }
+.status-btn::before { content:""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-btn svg { width: 11px; height: 11px; color: var(--ink-4); }
+.status-btn:hover { border-color: currentColor; }
+.status-btn.collecting { color: oklch(0.45 0.11 240); background: var(--info-soft); }
+.status-btn.resolving { color: oklch(0.48 0.13 75); background: var(--warn-soft); }
+.status-btn.resolved { color: oklch(0.42 0.12 155); background: var(--success-soft); }
 .status-menu {
   position: absolute; top: calc(100% + 4px); right: 0;
   background: var(--surface);
@@ -573,9 +481,8 @@ table.tbl {
   box-shadow: var(--shadow-xl);
   z-index: 30;
   transition: transform var(--dur-slow) var(--ease-out);
-  visibility: hidden;
 }
-.batch-bar.show { transform: translateX(-50%) translateY(0); visibility: visible; }
+.batch-bar.show { transform: translateX(-50%) translateY(0); }
 .batch-bar .cnt { background: var(--brand); color: #fff; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
 .batch-bar .sep { width: 1px; height: 16px; background: oklch(1 0 0 / 0.15); }
 .batch-bar button {
@@ -732,40 +639,16 @@ table.tbl {
   <!-- 顶部 -->
   <div class="topbar">
     <div class="brand">
-      <div class="logo">🦞</div>
-      <div class="nm">贴心Claw后台</div>
+      <div class="logo">反</div>
+      <div class="nm">反馈中心</div>
     </div>
     <div class="crumbs">
-      <span>工作台</span><span class="sep">/</span><span class="here" id="breadcrumb">用户反馈中心</span>
+      <span>工作台</span><span class="sep">/</span><span class="here">反馈列表</span>
     </div>
     <div class="spacer"></div>
     <button class="logout-btn" onclick="logout()">退出登录</button>
   </div>
 
-  <!-- KPI -->
-  <div class="app-layout">
-    <!-- 左侧导航 -->
-    <div class="sidebar" id="sidebar">
-      <!-- 悬浮折叠按钮 -->
-      <div class="sidebar-toggle-float" id="sidebarToggleFloat">
-        <button class="toggle-float-btn" onclick="toggleSidebar()" data-tip="收起导航" id="toggleFloatBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-      </div>
-      <nav class="sidebar-nav">
-        <button class="nav-item active" onclick="navFeedback()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="nav-label">用户反馈中心</span>
-        </button>
-        <button class="nav-item" onclick="navShrimp()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          <span class="nav-label">虾点子配置</span>
-        </button>
-      </nav>
-    </div>
-
-    <!-- 主内容区 -->
-    <div class="main-area">
   <!-- KPI -->
   <div class="kpi-strip" id="kpiStrip">
     <div class="kpi">
@@ -797,7 +680,6 @@ table.tbl {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <input type="text" id="searchInput" placeholder="搜索描述 / 提交人…" />
       </div>
-      <button class="btn btn-primary" id="searchBtn" style="padding:7px 14px;font-size:13px;height:34px;">搜索</button>
 
       <div class="seg-filter" id="statusFilter">
         <button class="active" data-status="all">全部</button>
@@ -820,9 +702,8 @@ table.tbl {
 
       <div class="tool-right">
         <span class="count-lbl" id="countLbl">-</span>
-        <button class="btn btn-ghost" style="height:32px; padding:0 12px; font-size:12.5px; gap:6px;" title="导出为Excel" onclick="exportToExcel()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-          导出为Excel
+        <button class="icon-btn" title="导出" onclick="exportToExcel()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
         </button>
       </div>
     </div>
@@ -849,6 +730,7 @@ table.tbl {
         <thead>
           <tr>
             <th style="width:36px;"><span class="ck" id="ckAll"></span></th>
+            <th style="width:88px;">ID</th>
             <th style="width:100px;">类型</th>
             <th>描述</th>
             <th style="width:100px;">空间</th>
@@ -865,12 +747,7 @@ table.tbl {
 
     <div class="paginate" id="paginate"></div>
   </div>
-  </div><!-- end main-area -->
-  </div><!-- end app-layout -->
 </div>
-
-<!-- Toast提示 -->
-<div id="toast" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.9);background:var(--ink);color:#fff;padding:12px 24px;border-radius:var(--r-lg);font-size:14px;opacity:0;transition:all 0.25s var(--ease);pointer-events:none;z-index:9999;white-space:nowrap;box-shadow:var(--shadow-xl);"></div>
 
 <!-- 批量栏 -->
 <div class="batch-bar" id="batchBar">
@@ -912,12 +789,7 @@ table.tbl {
   const API_BASE_URL = window.location.origin;
   const PASSWORD_KEY = 'admin_password';
 
-  // 用户部门查询配置
-  const UIC_API_BASE = 'https://toca.17u.cn/open-api/uic-apis/member/fuzzy-search';
-  const USER_ACCESS_TOKEN = ''; // 填入 UIC 接口 access token
-
-  // 部门缓存：{ searchKey: '部门字符串' }
-  const deptCache = {};
+  // 部门缓存（留空，由服务端在提交时写入）
 
   let currentPage = 1;
   let currentTypeFilter = 'all';
@@ -990,15 +862,13 @@ table.tbl {
   async function loadFeedbackList() {
     const password = localStorage.getItem(PASSWORD_KEY);
     const tbody = document.getElementById('tbody');
-    tbody.innerHTML = '<tr><td colspan="9" class="loading-state">加载中…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="loading-state">加载中…</td></tr>';
 
     try {
-      let url = `${API_BASE_URL}/api/feedback/list?page=${currentPage}&page_size=15`;
+      let url = `${API_BASE_URL}/api/feedback/list?page=${currentPage}&page_size=20`;
       if (currentTypeFilter !== 'all') url += `&issue_type=${encodeURIComponent(currentTypeFilter)}`;
       if (currentStatusFilter !== 'all') url += `&status=${encodeURIComponent(currentStatusFilter)}`;
       if (currentSpaceFilter !== 'all') url += `&space=${encodeURIComponent(currentSpaceFilter)}`;
-      const keyword = document.getElementById('searchInput').value.trim();
-      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
       const startDate = document.getElementById('startDate')?.value;
       const endDate = document.getElementById('endDate')?.value;
       if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
@@ -1018,7 +888,7 @@ table.tbl {
       }
     } catch (error) {
       console.error('加载列表失败:', error);
-      tbody.innerHTML = '<tr><td colspan="9" class="loading-state">加载失败，请刷新重试</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="loading-state">加载失败，请刷新重试</td></tr>';
     }
   }
 
@@ -1047,59 +917,11 @@ table.tbl {
     return { name: raw, employeeNo: '', display: raw, initial: raw[0] };
   }
 
-  // 查询单个用户的部门信息（带缓存）
-  async function fetchDepartment(searchKey) {
-    if (!searchKey || searchKey === '匿名') return null;
-    if (deptCache[searchKey] !== undefined) return deptCache[searchKey];
-
-    try {
-      const encodedKey = encodeURIComponent(searchKey);
-      const url = `${UIC_API_BASE}?searchKey=${encodedKey}`;
-      const headers = {};
-      if (USER_ACCESS_TOKEN) headers['Authorization'] = USER_ACCESS_TOKEN;
-
-      const resp = await fetch(url, { headers });
-      if (!resp.ok) { deptCache[searchKey] = null; return null; }
-
-      const json = await resp.json();
-      const members = json?.data?.members;
-      if (!members || members.length === 0) { deptCache[searchKey] = null; return null; }
-
-      const depts = members[0].departments;
-      if (!depts || depts.length === 0) { deptCache[searchKey] = null; return null; }
-
-      const deptStr = depts.map(d => d.departmentName).join(' / ');
-      deptCache[searchKey] = deptStr;
-      return deptStr;
-    } catch {
-      deptCache[searchKey] = null;
-      return null;
-    }
-  }
-
-  // 获取部门显示文本（直接使用服务端返回的 department 字段）
-  function getDeptDisplay(item) {
-    return item.department || '—';
-  }
-
-  // 批量获取列表中所有用户的部门信息
-  async function fetchDepartmentsForList(list) {
-    const keys = new Set();
-    list.forEach(item => {
-      const u = parseUserName(item.user_name);
-      // 优先用工号查，其次用姓名
-      if (u.employeeNo) keys.add(u.employeeNo);
-      else if (u.name && u.name !== '匿名') keys.add(u.name);
-    });
-    const promises = [...keys].map(k => fetchDepartment(k));
-    await Promise.allSettled(promises);
-  }
-
   // 渲染表格
   function renderTable(list) {
     const tbody = document.getElementById('tbody');
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="loading-state">暂无反馈数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="loading-state">暂无反馈数据</td></tr>';
       return;
     }
 
@@ -1110,6 +932,7 @@ table.tbl {
       return `
       <tr data-id="${item.id}">
         <td><span class="ck row-ck" data-id="${item.id}"></span></td>
+        <td class="id-col">#${String(item.id).padStart(4,'0')}</td>
         <td><span class="type-tag ${tc}">${escapeHtml(item.issue_type)}</span></td>
         <td class="desc-cell">${escapeHtml(item.description)}${item.images && item.images.length ? `<span class="imgs-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>${item.images.length}</span>` : ''}</td>
         <td>${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : '<span style="color:var(--ink-4);font-size:12px;">-</span>'}</td>
@@ -1122,7 +945,7 @@ table.tbl {
             </div>
           </div>
         </td>
-        <td style="font-size:12px; color:var(--ink-3); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${getDeptDisplay(item)}">${getDeptDisplay(item)}</td>
+        <td style="font-size:12px; color:var(--ink-3); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.department || '—'}">${item.department || '—'}</td>
         <td class="time-cell">${formatDateTime(item.created_at)}</td>
         <td>
           <div class="status-sel" data-item-id="${item.id}">
@@ -1296,9 +1119,6 @@ table.tbl {
   document.getElementById('searchInput').addEventListener('keypress', e => {
     if (e.key === 'Enter') { currentPage = 1; loadFeedbackList(); }
   });
-  document.getElementById('searchBtn').addEventListener('click', () => {
-    currentPage = 1; loadFeedbackList();
-  });
 
   // 分页
   function renderPagination(totalPages, total) {
@@ -1313,7 +1133,7 @@ table.tbl {
       }
     }
     el.innerHTML = `
-      <span>共 ${total} 条 · 每页 15 条</span>
+      <span>共 ${total} 条 · 每页 20 条</span>
       <div class="pager">
         <button ${currentPage === 1 ? 'disabled' : ''} onclick="goToPage(${currentPage-1})">‹</button>
         ${pages.map(p => p === '...' ? '<button disabled>…</button>' : `<button class="${p===currentPage?'active':''}" onclick="goToPage(${p})">${p}</button>`).join('')}
@@ -1359,7 +1179,7 @@ table.tbl {
       </div>
       <div class="field">
         <span class="flabel">所属部门</span>
-        <div class="fvalue" style="font-size:13px; color:var(--ink-3);">${getDeptDisplay(item)}</div>
+        <div class="fvalue" style="font-size:13px; color:var(--ink-3);">${item.department || '—'}</div>
       </div>
       <div class="field">
         <span class="flabel">状态</span>
@@ -1455,48 +1275,6 @@ table.tbl {
     if (e.key === 'ArrowRight') navigateImage(1);
   });
 
-  // 侧边栏展开/收起
-  function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const btn = document.getElementById('toggleFloatBtn');
-    sidebar.classList.toggle('collapsed');
-    const isCollapsed = sidebar.classList.contains('collapsed');
-    btn.setAttribute('data-tip', isCollapsed ? '展开导航' : '收起导航');
-  }
-
-  // 导航：用户反馈中心
-  function navFeedback() {
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    document.getElementById('breadcrumb').textContent = '用户反馈中心';
-  }
-
-  // 导航：虾点子配置
-  function navShrimp() {
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    document.getElementById('breadcrumb').textContent = '虾点子配置';
-    showToast('还未上线，敬请期待 🦞');
-    setTimeout(() => {
-      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-      document.querySelector('.nav-item').classList.add('active');
-      document.getElementById('breadcrumb').textContent = '用户反馈中心';
-    }, 2000);
-  }
-
-  // Toast 提示
-  function showToast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.style.opacity = '1';
-    t.style.transform = 'translate(-50%, -50%) scale(1)';
-    clearTimeout(t._timer);
-    t._timer = setTimeout(() => {
-      t.style.opacity = '0';
-      t.style.transform = 'translate(-50%, -50%) scale(0.9)';
-    }, 2500);
-  }
-
   // 退出
   function logout() { localStorage.removeItem(PASSWORD_KEY); location.reload(); }
 
@@ -1508,8 +1286,6 @@ table.tbl {
       if (currentTypeFilter !== 'all') url += `issue_type=${encodeURIComponent(currentTypeFilter)}&`;
       if (currentStatusFilter !== 'all') url += `status=${encodeURIComponent(currentStatusFilter)}&`;
       if (currentSpaceFilter !== 'all') url += `space=${encodeURIComponent(currentSpaceFilter)}&`;
-      const keyword = document.getElementById('searchInput').value.trim();
-      if (keyword) url += `keyword=${encodeURIComponent(keyword)}&`;
       const startDate = document.getElementById('startDate')?.value;
       const endDate = document.getElementById('endDate')?.value;
       if (startDate) url += `start_date=${encodeURIComponent(startDate)}&`;

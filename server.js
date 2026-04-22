@@ -102,6 +102,7 @@ function initDatabase() {
       device_info TEXT,
       user_id TEXT,
       user_name TEXT DEFAULT '',
+      department TEXT DEFAULT '',
       status TEXT DEFAULT '收集中',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -111,6 +112,7 @@ function initDatabase() {
   db.run(`ALTER TABLE feedback ADD COLUMN user_name TEXT DEFAULT ''`, () => {});
   db.run(`ALTER TABLE feedback ADD COLUMN status TEXT DEFAULT '收集中'`, () => {});
   db.run(`ALTER TABLE feedback ADD COLUMN space TEXT DEFAULT ''`, () => {});
+  db.run(`ALTER TABLE feedback ADD COLUMN department TEXT DEFAULT ''`, () => {});
 
   console.log(`[${formatDate()}] 数据库初始化完成: ${dbPath}`);
 }
@@ -387,7 +389,7 @@ async function sendTocaNotification({ issue_type, description, memberName, outer
               tag: 'button',
               text: {
                 tag: 'lark_md',
-                content: '查看详情'
+                content: '进入后台'
               },
               url: CONFIG.ADMIN_URL,
               type: 'default',
@@ -443,14 +445,15 @@ async function refreshTocaUserToken(refreshToken) {
   return response.data.data;
 }
 
-async function fetchMemberName(sessionId) {
+async function fetchMemberInfo(sessionId) {
   try {
     const session = userSessions.get(sessionId);
     if (!session || !session.tocaUserId) {
-      console.log(`[${formatDate()}] 查询用户姓名跳过: session 或 tocaUserId 不存在`);
-      return '';
+      console.log(`[${formatDate()}] 查询用户信息跳过: session 或 tocaUserId 不存在`);
+      return { memberName: '', department: '' };
     }
 
+    // 1. 用 appToken 调 uic/user 获取姓名
     const appToken = await getTocaAppToken();
     const resp = await request({
       method: 'GET',
@@ -461,21 +464,71 @@ async function fetchMemberName(sessionId) {
       }
     });
 
-    console.log(`[${formatDate()}] 查询用户姓名返回: ${JSON.stringify(resp.data)}`);
+    console.log(`[${formatDate()}] 查询用户信息返回: ${JSON.stringify(resp.data)}`);
 
+    let memberName = '';
     if (resp.data && resp.data.success && resp.data.data) {
-      const memberName = resp.data.data.memberName || '';
+      memberName = resp.data.data.memberName || '';
       if (memberName) {
         session.memberName = memberName;
-        console.log(`[${formatDate()}] 查询用户姓名成功: ${memberName}（${session.employeeNo}）`);
-        return memberName;
       }
     }
-    console.log(`[${formatDate()}] 查询用户姓名返回空，降级显示: ${session.outerMemberId || session.employeeNo}`);
+
+    // 2. 用用户自己的 access token 调 fuzzy-search 获取完整部门路径
+    let department = '';
+    const userAccessToken = session.userAccessToken;
+    if (userAccessToken) {
+      try {
+        const fuzzyResp = await request({
+          method: 'GET',
+          hostname: 'toca.17u.cn',
+          path: `/open-api/uic-apis/member/fuzzy-search?searchKey=${encodeURIComponent(session.outerMemberId || session.employeeNo || '')}`,
+          headers: {
+            'Authorization': userAccessToken,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        console.log(`[${formatDate()}] 部门查询返回: ${JSON.stringify(fuzzyResp.data)}`);
+
+        if (fuzzyResp.data && fuzzyResp.data.success && fuzzyResp.data.data?.members?.length > 0) {
+          const member = fuzzyResp.data.data.members[0];
+          const deptPaths = member.departmentPaths;
+          if (deptPaths && deptPaths.length > 0) {
+            // 取第一条路径，反转（distance 大→小），过滤掉公司根节点
+            const path = deptPaths[0];
+            const reversed = [...path].reverse();
+            department = reversed.filter(d => d.distance < 3).map(d => d.departmentName).join('/');
+          }
+          // 降级
+          if (!department && member.baseDepartments?.length > 0) {
+            department = member.baseDepartments.map(d => d.departmentName).join('/');
+          }
+        }
+      } catch (e) {
+        console.error(`[${formatDate()}] 部门信息查询失败:`, e.message);
+      }
+    }
+    // 降级：用 uic/user 返回的 departmentName
+    if (!department && resp.data?.data?.departmentName) {
+      department = resp.data.data.departmentName;
+    }
+
+    if (department) {
+      session.department = department;
+    }
+
+    console.log(`[${formatDate()}] 查询用户信息成功: ${memberName}（${session.employeeNo}）部门: ${department}`);
+    return { memberName, department };
   } catch (e) {
-    console.error(`[${formatDate()}] 查询用户姓名失败:`, e.message);
+    console.error(`[${formatDate()}] 查询用户信息失败:`, e.message);
   }
-  return '';
+  return { memberName: '', department: '' };
+}
+
+async function fetchMemberName(sessionId) {
+  const result = await fetchMemberInfo(sessionId);
+  return result.memberName;
 }
 
 async function checkAndRefreshUserToken(sessionId) {
@@ -789,8 +842,11 @@ async function handleSubmit(req, res) {
 
     // 如果 session 中没有姓名，同步查询一次
     if (!session.memberName) {
-      await fetchMemberName(cookies.sessionId);
+      await fetchMemberInfo(cookies.sessionId);
     }
+
+    // 使用 session 中的部门信息（登录时或提交时已查询）
+    let department = session.department || '';
 
     // 写入数据库：优先 memberName > outerMemberId > employeeNo
     const userName = session.memberName
@@ -800,9 +856,9 @@ async function handleSubmit(req, res) {
         : (session.employeeNo || '');
 
     db.run(
-      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, space)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId, userName, space || ''],
+      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, department, space)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId, userName, department, space || ''],
       function(err) {
         if (err) {
           console.error(`[${formatDate()}] 数据库写入失败:`, err);
@@ -847,10 +903,11 @@ function handleList(req, res) {
   const issueType = query.issue_type;
   const status = query.status;
   const space = query.space;
+  const keyword = query.keyword;
   const startDate = query.start_date;
   const endDate = query.end_date;
   const page = parseInt(query.page) || 1;
-  const pageSize = Math.min(parseInt(query.page_size) || 20, 100);
+  const pageSize = Math.min(parseInt(query.page_size) || 15, 100);
   const offset = (page - 1) * pageSize;
 
   // 构建查询条件
@@ -874,6 +931,12 @@ function handleList(req, res) {
     conditions.push('space = ?');
     countParams.push(space);
     queryParams.push(space);
+  }
+
+  if (keyword && keyword.trim()) {
+    conditions.push('(description LIKE ? OR user_name LIKE ?)');
+    countParams.push(`%${keyword.trim()}%`, `%${keyword.trim()}%`);
+    queryParams.push(`%${keyword.trim()}%`, `%${keyword.trim()}%`);
   }
 
   if (startDate) {
@@ -1028,7 +1091,7 @@ function handleExport(req, res) {
     }
 
     // 生成 CSV 内容
-    const headers = ['ID', '问题类型', '问题描述', '联系方式', '提交人', '所属空间', '当前状态', '图片链接', '设备信息', '提交时间'];
+    const headers = ['ID', '问题类型', '问题描述', '联系方式', '提交人', '所属部门', '所属空间', '当前状态', '图片链接', '设备信息', '提交时间'];
     let csvContent = headers.join(',') + '\n';
 
     rows.forEach(row => {
@@ -1039,6 +1102,7 @@ function handleExport(req, res) {
         escapeCsv(row.description),
         escapeCsv(row.contact || ''),
         escapeCsv(row.user_name || ''),
+        escapeCsv(row.department || ''),
         escapeCsv(row.space || ''),
         escapeCsv(row.status || '收集中'),
         escapeCsv(images),
