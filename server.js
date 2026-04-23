@@ -37,8 +37,8 @@ const CONFIG = {
   // 服务绑定地址
   HOST: process.env.HOST || 'localhost',
 
-  // 管理后台密码
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123',
+  // 管理后台工号白名单（逗号分隔）
+  ADMIN_EMPLOYEE_NOS: (process.env.ADMIN_EMPLOYEE_NOS || '1223489').split(',').map(s => s.trim()),
 
   // 数据目录
   DATA_DIR: './data',
@@ -122,6 +122,26 @@ function initDatabase() {
   db.run(`ALTER TABLE feedback ADD COLUMN status TEXT DEFAULT '收集中'`, () => {});
   db.run(`ALTER TABLE feedback ADD COLUMN space TEXT DEFAULT ''`, () => {});
   db.run(`ALTER TABLE feedback ADD COLUMN department TEXT DEFAULT ''`, () => {});
+  db.run(`ALTER TABLE feedback ADD COLUMN position TEXT DEFAULT ''`, () => {});
+
+  // 处理评论表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS feedback_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feedback_id INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      user_name TEXT DEFAULT '',
+      type TEXT DEFAULT 'comment',
+      content TEXT DEFAULT '',
+      images TEXT DEFAULT '[]',
+      status_snapshot TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (feedback_id) REFERENCES feedback(id)
+    )
+  `);
+
+  // 为旧评论数据添加 type 字段
+  db.run(`ALTER TABLE feedback_comments ADD COLUMN type TEXT DEFAULT 'comment'`, () => {});
 
   console.log(`[${formatDate()}] 数据库初始化完成: ${dbPath}`);
 }
@@ -215,7 +235,7 @@ function resolveCorsOrigins(req) {
 function setCORS(res, allowedOrigin = '*') {
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Admin-Password');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function sendJSON(res, statusCode, data) {
@@ -470,7 +490,7 @@ async function fetchMemberInfo(sessionId) {
     const session = userSessions.get(sessionId);
     if (!session || !session.tocaUserId) {
       console.log(`[${formatDate()}] 查询用户信息跳过: session 或 tocaUserId 不存在`);
-      return { memberName: '', department: '' };
+      return { memberName: '', department: '', position: '' };
     }
 
     // 1. 用 appToken 调 uic/user 获取姓名
@@ -494,56 +514,54 @@ async function fetchMemberInfo(sessionId) {
       }
     }
 
-    // 2. 用用户自己的 access token 调 fuzzy-search 获取完整部门路径
-    let department = '';
-    const userAccessToken = session.userAccessToken;
-    if (userAccessToken) {
-      try {
-        const fuzzyResp = await request({
-          method: 'GET',
-          hostname: 'toca.17u.cn',
-          path: `/open-api/uic-apis/member/fuzzy-search?searchKey=${encodeURIComponent(session.outerMemberId || session.employeeNo || '')}`,
-          headers: {
-            'Authorization': userAccessToken,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        console.log(`[${formatDate()}] 部门查询返回: ${JSON.stringify(fuzzyResp.data)}`);
-
-        if (fuzzyResp.data && fuzzyResp.data.success && fuzzyResp.data.data?.members?.length > 0) {
-          const member = fuzzyResp.data.data.members[0];
-          const deptPaths = member.departmentPaths;
-          if (deptPaths && deptPaths.length > 0) {
-            // 取第一条路径，反转（distance 大→小），过滤掉公司根节点
-            const path = deptPaths[0];
-            const reversed = [...path].reverse();
-            department = reversed.filter(d => d.distance < 3).map(d => d.departmentName).join('/');
-          }
-          // 降级
-          if (!department && member.baseDepartments?.length > 0) {
-            department = member.baseDepartments.map(d => d.departmentName).join('/');
-          }
+    // 2. 用 spaceToken 调 member/list-by-employee-nos 获取岗位信息
+    let position = '';
+    try {
+      const spaceToken = await getTocaSpaceToken();
+      const memberResp = await request({
+        method: 'POST',
+        hostname: 'toca.17u.cn',
+        path: `/open-api/uic-apis/member/list-by-employee-nos`,
+        headers: {
+          'Authorization': spaceToken,
+          'Content-Type': 'application/json'
         }
-      } catch (e) {
-        console.error(`[${formatDate()}] 部门信息查询失败:`, e.message);
+      }, {
+        spaceId: CONFIG.TOCA_SPACE_ID,
+        employeeNos: [session.employeeNo],
+        includeCustomData: true
+      });
+
+      console.log(`[${formatDate()}] 岗位查询返回: ${JSON.stringify(memberResp.data)}`);
+
+      if (memberResp.data && memberResp.data.success && memberResp.data.data?.length > 0) {
+        const member = memberResp.data.data[0];
+
+        // 岗位：从 customFields 中提取 post_level_name
+        if (member.customFields?.length > 0) {
+          const postField = member.customFields.find(f => f.name === 'post_level_name');
+          if (postField) position = postField.value;
+        }
       }
+    } catch (e) {
+      console.error(`[${formatDate()}] 岗位信息查询失败:`, e.message);
     }
-    // 降级：用 uic/user 返回的 departmentName
-    if (!department && resp.data?.data?.departmentName) {
+
+    // 3. 部门：用 uic/user 返回的 departmentName（TOCA 中配置的末级部门名）
+    let department = '';
+    if (resp.data?.data?.departmentName) {
       department = resp.data.data.departmentName;
     }
 
-    if (department) {
-      session.department = department;
-    }
+    if (department) session.department = department;
+    if (position) session.position = position;
 
     console.log(`[${formatDate()}] 查询用户信息成功: ${memberName}（${session.employeeNo}）部门: ${department}`);
-    return { memberName, department };
+    return { memberName, department, position };
   } catch (e) {
     console.error(`[${formatDate()}] 查询用户信息失败:`, e.message);
   }
-  return { memberName: '', department: '' };
+  return { memberName: '', department: '', position: '' };
 }
 
 async function fetchMemberName(sessionId) {
@@ -707,6 +725,132 @@ async function handleTocaCallback(req, res) {
   }
 }
 
+// ==================== 管理后台 TOCA 登录 ====================
+async function handleAdminTocaLogin(req, res) {
+  try {
+    const state = generateUUID();
+    oauthStates.set(state, { createdAt: Date.now() });
+
+    const isProd = CONFIG.HOST !== 'localhost' && !CONFIG.HOST.includes('127.0.0.1');
+    const callbackBase = isProd ? CONFIG.ADMIN_URL.replace('/admin.html', '') : `http://localhost:3001`;
+    const redirectUri = `${callbackBase}/api/admin/auth/callback`;
+    const authUrl = `${CONFIG.TOCA_OAUTH_AUTHORIZE_URL}?agentId=${CONFIG.TOCA_AGENT_ID}&redirectUri=${encodeURIComponent(redirectUri)}&state=${state}`;
+
+    res.writeHead(302, { 'Location': authUrl });
+    res.end();
+  } catch (error) {
+    sendError(res, '登录跳转失败', 500);
+  }
+}
+
+// 管理后台专用：创建 session 并检查工号白名单
+async function handleAdminTocaCallback(req, res) {
+  try {
+    const query = url.parse(req.url, true).query;
+    const code = query.code;
+    const state = query.state;
+
+    if (!code) {
+      return renderErrorPage(res, '授权失败', query.error || '授权失败');
+    }
+
+    const appToken = await getTocaAppToken();
+    const response = await request({
+      method: 'POST',
+      protocol: 'http:',
+      hostname: 'toca.17u.cn',
+      path: '/open-api/oauth/getUserByAuthCode',
+      headers: { 'Content-Type': 'application/json', 'Authorization': appToken }
+    }, { authCode: code });
+
+    if (!response.data.success) {
+      return renderErrorPage(res, '获取用户信息失败', response.data.message);
+    }
+
+    const userData = response.data.data;
+    const employeeNo = userData.employeeNo;
+
+    // 检查工号白名单
+    if (!CONFIG.ADMIN_EMPLOYEE_NOS.includes(employeeNo)) {
+      return renderErrorPage(res, '无管理权限', `工号 ${employeeNo} 未被授权为管理员，请联系系统管理员配置`);
+    }
+
+    const sessionId = generateUUID();
+    userSessions.set(sessionId, {
+      openId: userData.openId,
+      outerMemberId: userData.outerMemberId,
+      employeeNo: userData.employeeNo,
+      tocaUserId: extractUserIdFromToken(userData.userAccessToken),
+      name: userData.name || userData.memberName || userData.nickName || userData.userName || '',
+      memberName: '',
+      userAccessToken: userData.userAccessToken,
+      refreshToken: userData.refreshToken,
+      accessTokenExpireInTimestamp: userData.accessTokenExpireInTimestamp * 1000,
+      loginTime: Date.now(),
+      isAdmin: true
+    });
+
+    fetchMemberName(sessionId);
+
+    console.log(`[${formatDate()}] 管理员登录成功: ${userData.name || ''} (${employeeNo})`);
+
+    const isHttps = CONFIG.HOST !== 'localhost' && !CONFIG.HOST.includes('127.0.0.1') && process.env.NODE_ENV === 'production';
+    const cookieOptions = isHttps
+      ? `adminSessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=None; Secure`
+      : `adminSessionId=${sessionId}; HttpOnly; Path=/; Max-Age=1296000; SameSite=Lax`;
+
+    res.writeHead(302, {
+      'Location': '/admin.html',
+      'Set-Cookie': cookieOptions
+    });
+    res.end();
+  } catch (error) {
+    console.error(`[${formatDate()}] 管理员 OAuth 回调错误:`, error.message);
+    renderErrorPage(res, '授权出错', error.message);
+  }
+}
+
+// 管理后台权限检查中间件
+function checkAdminAuth(req, res) {
+  const cookie = req.headers.cookie;
+  if (!cookie) return null;
+
+  const cookies = cookie.split(';').reduce((acc, c) => {
+    const [key, value] = c.trim().split('=');
+    acc[key] = value;
+    return acc;
+  }, {});
+
+  const sessionId = cookies.adminSessionId;
+  if (!sessionId) return null;
+
+  const session = userSessions.get(sessionId);
+  if (!session || !session.isAdmin) return null;
+
+  return session;
+}
+
+// 管理后台退出
+function handleAdminLogout(req, res) {
+  const cookie = req.headers.cookie;
+  if (cookie) {
+    const cookies = cookie.split(';').reduce((acc, c) => {
+      const [key, value] = c.trim().split('=');
+      acc[key] = value;
+      return acc;
+    }, {});
+    if (cookies.adminSessionId) {
+      userSessions.delete(cookies.adminSessionId);
+    }
+  }
+  const clearCookie = 'adminSessionId=; HttpOnly; Path=/; Max-Age=0';
+  res.writeHead(302, {
+    'Location': '/admin.html',
+    'Set-Cookie': clearCookie
+  });
+  res.end();
+}
+
 function renderErrorPage(res, title, message) {
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(`
@@ -792,7 +936,9 @@ async function handleGetUserInfo(req, res) {
       openId: session.openId,
       employeeNo: session.employeeNo,
       outerMemberId: session.outerMemberId,
-      name: session.name || ''
+      name: session.name || '',
+      department: session.department || '',
+      position: session.position || ''
     });
 
   } catch (error) {
@@ -865,8 +1011,9 @@ async function handleSubmit(req, res) {
       await fetchMemberInfo(cookies.sessionId);
     }
 
-    // 使用 session 中的部门信息（登录时或提交时已查询）
+    // 使用 session 中的部门和岗位信息
     let department = session.department || '';
+    let position = session.position || '';
 
     // 写入数据库：优先 memberName > outerMemberId > employeeNo
     const userName = session.memberName
@@ -876,9 +1023,9 @@ async function handleSubmit(req, res) {
         : (session.employeeNo || '');
 
     db.run(
-      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, department, space)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId, userName, department, space || ''],
+      `INSERT INTO feedback (issue_type, description, contact, images, device_info, user_id, user_name, department, position, space)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [issue_type, description, contact || '', JSON.stringify(imagePaths), device_info || '', session.openId, userName, department, position, space || ''],
       function(err) {
         if (err) {
           console.error(`[${formatDate()}] 数据库写入失败:`, err);
@@ -911,11 +1058,8 @@ async function handleSubmit(req, res) {
 
 // ==================== 查询接口 ====================
 function handleList(req, res) {
-  // 密码校验
-  const adminPassword = req.headers['admin-password'];
-  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
-    return sendError(res, '密码错误', 401);
-  }
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
 
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
@@ -1013,11 +1157,8 @@ function handleList(req, res) {
 
 // ==================== 统计接口 ====================
 function handleStats(req, res) {
-  // 密码校验
-  const adminPassword = req.headers['admin-password'];
-  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
-    return sendError(res, '密码错误', 401);
-  }
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
 
   db.all(
     `SELECT issue_type, COUNT(*) as count FROM feedback GROUP BY issue_type`,
@@ -1054,13 +1195,228 @@ function handleStats(req, res) {
   );
 }
 
+// ==================== 数据概览接口 ====================
+function handleOverview(req, res) {
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
+
+  const now = new Date();
+  const dayOfWeek = now.getDay() || 7; // 1=周一, 7=周日
+  const thisWeekStart = new Date(now);
+  thisWeekStart.setDate(now.getDate() - dayOfWeek + 1);
+  thisWeekStart.setHours(0, 0, 0, 0);
+  const thisWeekStartStr = thisWeekStart.toISOString().slice(0, 10);
+
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+  const lastWeekStartStr = lastWeekStart.toISOString().slice(0, 10);
+
+  db.get(
+    `SELECT
+       COUNT(*) as total,
+       SUM(CASE WHEN date(created_at) >= ? THEN 1 ELSE 0 END) as total_tw,
+       SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? THEN 1 ELSE 0 END) as total_lw,
+       SUM(CASE WHEN date(created_at) >= ? AND status = '收集中' THEN 1 ELSE 0 END) as pending_tw,
+       SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? AND status = '收集中' THEN 1 ELSE 0 END) as pending_lw,
+       SUM(CASE WHEN date(created_at) >= ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved_tw,
+       SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved_lw
+     FROM feedback`,
+    [thisWeekStartStr, lastWeekStartStr, thisWeekStartStr, thisWeekStartStr, lastWeekStartStr, thisWeekStartStr, thisWeekStartStr, lastWeekStartStr, thisWeekStartStr],
+    (err, row) => {
+      if (err) {
+        console.error(`[${formatDate()}] 概览查询失败:`, err);
+        return sendError(res, '查询失败');
+      }
+
+      const total = row.total || 0;
+      const totalTw = row.total_tw || 0;
+      const totalLw = row.total_lw || 0;
+      const pendingTw = row.pending_tw || 0;
+      const pendingLw = row.pending_lw || 0;
+      const resolvedTw = row.resolved_tw || 0;
+      const resolvedLw = row.resolved_lw || 0;
+
+      const newCountTw = totalTw; // 本周新增 = 本周创建的总数
+      const newCountLw = totalLw; // 上周7天新增
+      const dailyAvg = (newCountLw / 7).toFixed(1); // 上周日均
+
+      sendSuccess(res, {
+        total: {
+          value: total,
+          delta: totalTw - totalLw
+        },
+        new_count: {
+          value: newCountTw,
+          delta: newCountTw - newCountLw,
+          daily_avg: dailyAvg
+        },
+        pending: {
+          value: pendingTw,
+          delta: pendingTw - pendingLw
+        },
+        resolved: {
+          value: resolvedTw,
+          delta: resolvedTw - resolvedLw
+        }
+      });
+    }
+  );
+}
+
+// ==================== 周趋势接口 ====================
+function handleWeeklyTrend(req, res) {
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
+
+  const now = new Date();
+  const dayOfWeek = now.getDay() || 7;
+  const thisWeekStart = new Date(now);
+  thisWeekStart.setDate(now.getDate() - dayOfWeek + 1);
+  thisWeekStart.setHours(0, 0, 0, 0);
+
+  // 过去4周共28天
+  const startDate = new Date(thisWeekStart);
+  startDate.setDate(startDate.getDate() - 27);
+  const startDateStr = startDate.toISOString().slice(0, 10);
+  const endDateStr = now.toISOString().slice(0, 10);
+
+  // 生成28天的日期列表
+  const days = [];
+  for (let i = 0; i < 28; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  db.all(
+    `SELECT date(created_at) as day,
+            COUNT(*) as new_count,
+            SUM(CASE WHEN status = '收集中' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = '已解决' THEN 1 ELSE 0 END) as resolved
+     FROM feedback
+     WHERE date(created_at) >= ? AND date(created_at) <= ?
+     GROUP BY day
+     ORDER BY day`,
+    [startDateStr, endDateStr],
+    (err, rows) => {
+      if (err) {
+        console.error(`[${formatDate()}] 趋势查询失败:`, err);
+        return sendError(res, '查询失败');
+      }
+
+      // 按天聚合
+      const byDay = {};
+      rows.forEach(r => { byDay[r.day] = r; });
+
+      const trend = days.map(day => ({
+        date: day,
+        new_count: byDay[day]?.new_count || 0,
+        pending: byDay[day]?.pending || 0,
+        resolved: byDay[day]?.resolved || 0
+      }));
+
+      sendSuccess(res, { trend });
+    }
+  );
+}
+
+// ==================== 评论接口 ====================
+// GET /api/feedbacks/:id/comments
+function handleGetComments(req, res) {
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
+
+  const parsedUrl = url.parse(req.url, true);
+  const segments = parsedUrl.pathname.split('/');
+  const feedbackId = segments[segments.length - 2];
+
+  db.all(
+    `SELECT * FROM feedback_comments WHERE feedback_id = ? ORDER BY created_at ASC`,
+    [feedbackId],
+    (err, rows) => {
+      if (err) {
+        console.error(`[${formatDate()}] 查询评论失败:`, err);
+        return sendError(res, '查询失败');
+      }
+      sendSuccess(res, { comments: rows || [] });
+    }
+  );
+}
+
+// POST /api/feedbacks/:id/comments
+function handleCreateComment(req, res) {
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
+
+  const parsedUrl = url.parse(req.url, true);
+  const segments = parsedUrl.pathname.split('/');
+  const feedbackId = segments[segments.length - 2];
+
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch (e) {
+      return sendError(res, '请求格式错误', 400);
+    }
+
+    const content = (data.content || '').trim();
+    const images = data.images || [];
+    const statusSnapshot = data.status_snapshot || '';
+    const userName = data.user_name || '管理员';
+
+    if (!content && images.length === 0) {
+      return sendError(res, '备注内容不能为空', 400);
+    }
+
+    db.run(
+      `INSERT INTO feedback_comments (feedback_id, user_id, user_name, content, images, status_snapshot)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [feedbackId, 'admin', userName, content, JSON.stringify(images), statusSnapshot],
+      function(err) {
+        if (err) {
+          console.error(`[${formatDate()}] 写入评论失败:`, err);
+          return sendError(res, '提交失败');
+        }
+        sendSuccess(res, { id: this.lastID });
+      }
+    );
+  });
+}
+
+// 评论图片上传
+function handleCommentImageUpload(req, res) {
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
+
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (r, f, cb) => cb(null, CONFIG.UPLOAD_DIR),
+      filename: (r, f, cb) => {
+        const ext = path.extname(f.originalname).toLowerCase() || '.png';
+        cb(null, 'comment_' + Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
+      }
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (r, f, cb) => {
+      if (['image/jpeg', 'image/png', 'image/jpg'].includes(f.mimetype)) cb(null, true);
+      else cb(new Error('只允许 jpg/png 图片'));
+    }
+  }).single('image');
+
+  upload(req, res, (err) => {
+    if (err) return sendError(res, err.message, 400);
+    if (!req.file) return sendError(res, '未上传文件', 400);
+    sendSuccess(res, { filename: req.file.filename });
+  });
+}
+
 // ==================== 导出接口 ====================
 function handleExport(req, res) {
-  // 密码校验
-  const adminPassword = req.headers['admin-password'];
-  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
-    return sendError(res, '密码错误', 401);
-  }
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
 
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
@@ -1164,11 +1520,8 @@ function escapeCsv(value) {
 
 // ==================== 状态更新接口 ====================
 function handleUpdateStatus(req, res) {
-  // 密码校验
-  const adminPassword = req.headers['admin-password'];
-  if (adminPassword !== CONFIG.ADMIN_PASSWORD) {
-    return sendError(res, '密码错误', 401);
-  }
+  const session = checkAdminAuth(req, res);
+  if (!session) return sendError(res, '未授权，请先登录', 401);
 
   // 读取请求体
   let body = '';
@@ -1187,20 +1540,46 @@ function handleUpdateStatus(req, res) {
         return sendError(res, '无效的状态值', 400);
       }
 
-      db.run(
-        'UPDATE feedback SET status = ? WHERE id = ?',
-        [status, id],
-        function(err) {
-          if (err) {
-            console.error(`[${formatDate()}] 状态更新失败:`, err);
-            return sendError(res, '更新失败');
-          }
-          if (this.changes === 0) {
-            return sendError(res, '记录不存在', 404);
-          }
-          sendSuccess(res, { message: '状态更新成功' });
+      // 先查询当前状态
+      db.get('SELECT status FROM feedback WHERE id = ?', [id], (err, row) => {
+        if (err) {
+          console.error(`[${formatDate()}] 查询当前状态失败:`, err);
+          return sendError(res, '更新失败');
         }
-      );
+        if (!row) {
+          return sendError(res, '记录不存在', 404);
+        }
+
+        const oldStatus = row.status;
+        if (oldStatus === status) {
+          return sendSuccess(res, { message: '状态未变更' });
+        }
+
+        db.run(
+          'UPDATE feedback SET status = ? WHERE id = ?',
+          [status, id],
+          function(err) {
+            if (err) {
+              console.error(`[${formatDate()}] 状态更新失败:`, err);
+              return sendError(res, '更新失败');
+            }
+
+            // 自动记录状态变更到 comments 表
+            db.run(
+              `INSERT INTO feedback_comments (feedback_id, user_id, user_name, type, content, status_snapshot)
+               VALUES (?, ?, ?, 'status_change', '', ?)`,
+              [id, 'admin', '管理员', JSON.stringify({ from: oldStatus, to: status })],
+              (err) => {
+                if (err) {
+                  console.error(`[${formatDate()}] 记录状态变更失败:`, err);
+                }
+              }
+            );
+
+            sendSuccess(res, { message: '状态更新成功' });
+          }
+        );
+      });
     } catch (e) {
       sendError(res, '请求格式错误', 400);
     }
@@ -1234,6 +1613,19 @@ const server = http.createServer(async (req, res) => {
       return handleLogout(req, res);
     }
 
+    // 管理后台 TOCA 登录
+    if (pathname === '/api/admin/auth/login' && req.method === 'GET') {
+      return await handleAdminTocaLogin(req, res);
+    }
+
+    if (pathname === '/api/admin/auth/callback' && req.method === 'GET') {
+      return await handleAdminTocaCallback(req, res);
+    }
+
+    if (pathname === '/api/admin/auth/logout' && req.method === 'GET') {
+      return handleAdminLogout(req, res);
+    }
+
     if (pathname === '/api/user/info' && req.method === 'GET') {
       return await handleGetUserInfo(req, res);
     }
@@ -1253,6 +1645,16 @@ const server = http.createServer(async (req, res) => {
       return handleStats(req, res);
     }
 
+    // 数据概览接口
+    if (pathname === '/api/stats/overview' && req.method === 'GET') {
+      return handleOverview(req, res);
+    }
+
+    // 周趋势接口
+    if (pathname === '/api/stats/weekly-trend' && req.method === 'GET') {
+      return handleWeeklyTrend(req, res);
+    }
+
     // 导出接口
     if (pathname === '/api/feedback/export' && req.method === 'GET') {
       return handleExport(req, res);
@@ -1261,6 +1663,17 @@ const server = http.createServer(async (req, res) => {
     // 状态更新接口
     if (pathname === '/api/feedback/update-status' && req.method === 'POST') {
       return handleUpdateStatus(req, res);
+    }
+
+    // 评论图片上传接口
+    if (pathname === '/api/upload-comment-image' && req.method === 'POST') {
+      return handleCommentImageUpload(req, res);
+    }
+
+    // 评论接口
+    if (pathname.startsWith('/api/feedbacks/') && pathname.endsWith('/comments')) {
+      if (req.method === 'GET') return handleGetComments(req, res);
+      if (req.method === 'POST') return handleCreateComment(req, res);
     }
 
     // 图片访问路由

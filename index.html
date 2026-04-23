@@ -931,6 +931,8 @@ body {
       });
       const result = await response.json();
       if (response.ok && result.success) {
+        submitBtn.classList.remove('loading');
+        submitBtn.disabled = false;
         document.getElementById('successScreen').classList.add('show');
       } else if (response.status === 401) {
         showToast('登录已过期，请重新登录', 'error');
@@ -953,6 +955,8 @@ body {
     files = []; renderThumbs();
     typeCards.forEach(c => c.classList.remove('is-checked'));
     counter.textContent = '0 / 500';
+    submitBtn.classList.remove('loading');
+    submitBtn.disabled = false;
     validate();
   }
 

@@ -187,56 +187,6 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 /* ---------- 主内容区 ---------- */
 .main-area { flex: 1; min-width: 0; overflow-x: auto; }
 
-/* ---------- 密码弹窗 ---------- */
-.pw-modal {
-  position: fixed; inset: 0;
-  background: oklch(0.2 0.02 60 / 0.4);
-  backdrop-filter: blur(4px);
-  display: flex; justify-content: center; align-items: center;
-  z-index: 1000;
-}
-.pw-modal.hidden { display: none; }
-.pw-box {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-xl);
-  padding: 36px 32px;
-  box-shadow: var(--shadow-xl);
-  width: 100%; max-width: 380px;
-}
-.pw-box h2 {
-  font-family: var(--font-serif);
-  font-size: var(--text-xl);
-  font-weight: 600;
-  color: var(--ink);
-  text-align: center;
-  margin-bottom: 20px;
-}
-.pw-box input {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  font-size: var(--text-md);
-  font-family: inherit;
-  color: var(--ink);
-  background: var(--surface);
-  margin-bottom: 14px;
-  transition: all var(--dur) var(--ease);
-}
-.pw-box input:focus { outline: none; border-color: var(--brand); box-shadow: var(--focus-ring); }
-.pw-box input::placeholder { color: var(--ink-4); }
-.pw-box .pw-btn {
-  width: 100%; padding: 10px 16px;
-  background: var(--brand); color: #fff;
-  border: 0; border-radius: var(--r-md);
-  font-size: var(--text-md); font-weight: 600; cursor: pointer;
-  transition: all var(--dur) var(--ease);
-  box-shadow: 0 1px 2px oklch(0.4 0.14 42 / 0.25), inset 0 1px 0 oklch(1 0 0 / 0.15);
-}
-.pw-box .pw-btn:hover { background: var(--brand-hover); }
-.pw-error { color: var(--danger); font-size: var(--text-sm); text-align: center; margin-top: 10px; }
-
 /* ---------- 顶部 ---------- */
 .topbar {
   background: var(--surface);
@@ -279,23 +229,30 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
   padding: 22px 28px 0;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
 }
-.kpi {
+.kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 14px 18px;
-  display: flex; flex-direction: column; gap: 4px;
+  padding: 16px 18px 14px;
+  display: flex; flex-direction: column; gap: 6px;
   position: relative;
-  overflow: hidden;
+  min-height: 90px;
 }
-.kpi .lbl { font-size: 11.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; }
-.kpi .row { display: flex; align-items: baseline; gap: 8px; }
-.kpi .val { font-family: var(--font-serif); font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-.kpi .delta { font-size: 11.5px; padding: 2px 6px; border-radius: 4px; }
-.kpi .delta.up { color: oklch(0.42 0.12 155); background: var(--success-soft); }
-.kpi .delta.down { color: var(--danger); background: var(--danger-soft); }
-.kpi .hint { font-size: 11.5px; color: var(--ink-4); margin-top: 2px; }
-.kpi .spark { position: absolute; right: 14px; bottom: 14px; opacity: 0.6; }
+.kpi-card .lbl { font-size: 12px; color: var(--ink-3); font-weight: 500; }
+.kpi-card .row { display: flex; align-items: baseline; gap: 8px; }
+.kpi-card .val { font-family: var(--font-serif); font-size: 28px; font-weight: 600; color: var(--ink); line-height: 1.1; }
+.kpi-card .delta {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 12px; font-weight: 500; padding: 2px 6px; border-radius: 4px;
+}
+.kpi-card .delta.up { color: oklch(0.42 0.12 155); background: var(--success-soft); }
+.kpi-card .delta.down { color: var(--danger); background: var(--danger-soft); }
+.kpi-card .hint { font-size: 11.5px; color: var(--ink-4); margin-top: 0px; }
+.kpi-card .spark-wrap {
+  position: absolute; right: 12px; bottom: 8px;
+  width: 56px; height: 20px; opacity: 0.45;
+}
+.kpi-card .spark-wrap canvas { width: 100%; height: 100%; }
 
 /* ---------- 主面板 ---------- */
 .panel {
@@ -370,9 +327,9 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .tbl-wrap { overflow-x: auto; }
 table.tbl {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate; border-spacing: 0;
   font-size: 13px;
-  min-width: 900px;
 }
 .tbl thead th {
   text-align: left;
@@ -440,7 +397,7 @@ table.tbl {
 
 .desc-cell {
   color: var(--ink);
-  max-width: 380px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -457,6 +414,7 @@ table.tbl {
 .user-cell {
   display: flex; align-items: center; gap: 8px;
   white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .user-cell .av {
   width: 22px; height: 22px; border-radius: 50%;
@@ -490,7 +448,7 @@ table.tbl {
 .status-btn.resolving { color: oklch(0.42 0.13 75); background: var(--warn-soft); border-color: oklch(0.84 0.08 75); }
 .status-btn.resolved { color: oklch(0.36 0.12 155); background: var(--success-soft); border-color: oklch(0.82 0.07 155); }
 .status-menu {
-  position: absolute; top: calc(100% + 4px); right: 0;
+  position: absolute; top: calc(100% + 4px); left: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -626,6 +584,25 @@ table.tbl {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field .flabel { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; }
 .field .fvalue { font-size: 13.5px; color: var(--ink); }
+/* Info grid layout */
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.info-item { display: flex; flex-direction: column; gap: 4px; }
+.info-item .label { font-size: 11px; color: var(--ink-4); }
+.info-item .value { font-size: 13px; color: var(--ink); font-weight: 500; }
+.submitter-row { display: flex; align-items: center; gap: 10px; }
+.submitter-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, oklch(0.7 0.12 180), oklch(0.55 0.14 220));
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; flex-shrink: 0;
+}
+.submitter-name { font-size: 13px; font-weight: 500; }
+.submitter-id { font-size: 11px; color: var(--ink-4); }
+.device-info {
+  font-size: 12px; color: var(--ink-3); font-family: var(--font-mono);
+  background: var(--bg); padding: 10px 12px; border-radius: var(--r-sm);
+  word-break: break-all; line-height: 1.6;
+}
 .desc-block {
   padding: 14px; background: var(--bg-soft);
   border: 1px solid var(--border); border-radius: var(--r-md);
@@ -643,6 +620,112 @@ table.tbl {
 }
 .drawer-images img:hover { transform: scale(1.05); }
 .drawer-foot { padding: 12px 22px; border-top: 1px solid var(--divider); display: flex; gap: 8px; }
+
+/* Timeline */
+.timeline-section { margin-top: 8px; }
+.timeline-section .ttl { font-family: var(--font-serif); font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 14px; }
+.timeline { position: relative; }
+.timeline-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 24px 0 8px; color: var(--ink-4);
+}
+.timeline-empty-icon { font-size: 28px; opacity: 0.4; }
+.timeline-empty-text { font-size: 13px; }
+.timeline-item { display: flex; gap: 12px; padding: 12px 0; position: relative; }
+.timeline-item:not(:last-child)::after {
+  content: ''; position: absolute; left: 12px; top: 42px; bottom: 0;
+  width: 1px; background: var(--border);
+}
+.timeline-avatar-wrap { flex-shrink: 0; padding-top: 2px; }
+.timeline-avatar-sm {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: oklch(0.6 0.13 180); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+}
+.timeline-content { flex: 1; min-width: 0; }
+.timeline-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.timeline-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.timeline-action { font-size: 12px; color: var(--ink-3); }
+.timeline-time { margin-left: auto; font-size: 11px; color: var(--ink-4); flex-shrink: 0; }
+.timeline-status-change {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 500;
+}
+.timeline-status-change.solving { background: oklch(0.96 0.06 85); color: oklch(0.55 0.13 85); }
+.timeline-status-change.done { background: oklch(0.96 0.06 145); color: oklch(0.5 0.13 155); }
+.timeline-status-change.collecting { background: oklch(0.95 0.05 240); color: oklch(0.55 0.11 240); }
+.timeline-bubble {
+  background: var(--bg); border-radius: var(--r-md);
+  padding: 10px 12px; font-size: 13px; line-height: 1.6;
+  color: var(--ink); margin-bottom: 8px; white-space: pre-wrap; word-break: break-word;
+}
+.timeline-images { display: flex; flex-wrap: wrap; gap: 8px; }
+.timeline-images img,
+.timeline-images .img-thumb {
+  width: 72px; height: 72px; object-fit: cover; border-radius: var(--r-sm);
+  border: 1px solid var(--border); cursor: pointer; transition: transform var(--dur) var(--ease);
+}
+.timeline-images img:hover,
+.timeline-images .img-thumb:hover { transform: scale(1.04); }
+
+/* Comment input */
+.comment-box {
+  border: 1.5px solid var(--border); border-radius: var(--r-lg);
+  overflow: hidden; background: var(--surface);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.comment-box:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px oklch(0.55 0.13 75 / 0.08);
+}
+.comment-textarea {
+  width: 100%; border: none; outline: none; resize: none;
+  padding: 12px 14px; font-size: 13px; font-family: inherit;
+  color: var(--ink); background: transparent;
+  min-height: 80px; line-height: 1.6;
+}
+.comment-textarea::placeholder { color: var(--ink-4); }
+.comment-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid var(--border);
+  background: #FAFAFA;
+}
+.comment-toolbar-left { display: flex; align-items: center; gap: 4px; }
+.comment-upload {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: var(--r-sm); border: none;
+  background: transparent; color: var(--ink-3);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.comment-upload:hover { background: var(--border); color: var(--ink); }
+.comment-upload svg { width: 13px; height: 13px; flex-shrink: 0; }
+.comment-preview { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.comment-preview .thumb {
+  position: relative; width: 48px; height: 48px; border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border);
+}
+.comment-preview .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.comment-preview .thumb .x {
+  position: absolute; top: 0; right: 0; width: 16px; height: 16px;
+  background: oklch(0 0 0 / 0.5); color: #fff; border: 0;
+  border-radius: 0 0 0 6px; cursor: pointer; font-size: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.comment-submit-btn {
+  padding: 6px 16px; border-radius: var(--r-sm); border: none;
+  background: var(--brand); color: #fff;
+  font-size: 13px; font-weight: 500; font-family: inherit;
+  cursor: pointer; transition: background var(--dur) var(--ease), transform 0.1s;
+}
+.comment-submit-btn:hover { background: var(--brand-hover); }
+.comment-submit-btn:active { transform: scale(0.97); }
+.comment-submit-btn:disabled {
+  background: var(--border); color: var(--ink-4); cursor: not-allowed;
+}
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   gap: 6px; padding: 10px 16px;
@@ -716,13 +799,13 @@ table.tbl {
 </head>
 <body>
 
-<!-- 密码弹窗 -->
-<div class="pw-modal" id="pwModal">
-  <div class="pw-box">
-    <h2>管理后台登录</h2>
-    <input type="password" id="pwInput" placeholder="请输入管理密码" autofocus />
-    <button class="pw-btn" onclick="verifyPassword()">进入后台</button>
-    <div class="pw-error" id="pwError"></div>
+<!-- 登录遮罩 -->
+<div id="loginOverlay" style="position:fixed;inset:0;background:oklch(0.97 0.005 70);display:flex;justify-content:center;align-items:center;z-index:1000;">
+  <div style="text-align:center;">
+    <div style="font-size:48px;margin-bottom:16px;">🦞</div>
+    <h2 style="font-size:20px;font-weight:600;color:#1a1a1a;margin-bottom:8px;">管理后台</h2>
+    <p style="font-size:14px;color:#666;margin-bottom:24px;">请使用 TOCA 账号登录</p>
+    <button onclick="window.location.href='/api/admin/auth/login'" style="padding:10px 32px;background:oklch(0.55 0.18 42);color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">TOCA 登录</button>
   </div>
 </div>
 
@@ -768,25 +851,29 @@ table.tbl {
     <div class="main-area">
   <!-- KPI -->
   <div class="kpi-strip" id="kpiStrip">
-    <div class="kpi">
+    <div class="kpi-card" data-kpi="total">
       <span class="lbl">总反馈</span>
-      <div class="row"><span class="val" id="kpiTotal">-</span></div>
-      <span class="hint">全部反馈数量</span>
+      <div class="row"><span class="val" id="kpiTotal">-</span><span class="delta" id="kpiDeltaTotal"></span></div>
+      <span class="hint" id="kpiHintTotal">对比上周</span>
+      <div class="spark-wrap"><canvas id="sparkTotal"></canvas></div>
     </div>
-    <div class="kpi">
+    <div class="kpi-card" data-kpi="new">
+      <span class="lbl">本周新增</span>
+      <div class="row"><span class="val" id="kpiNew">-</span><span class="delta" id="kpiDeltaNew"></span></div>
+      <span class="hint" id="kpiHintNew">日均 - 条</span>
+      <div class="spark-wrap"><canvas id="sparkNew"></canvas></div>
+    </div>
+    <div class="kpi-card" data-kpi="pending">
       <span class="lbl">待处理</span>
-      <div class="row"><span class="val" id="kpiPending" style="color:var(--danger);">-</span></div>
-      <span class="hint">收集中</span>
+      <div class="row"><span class="val" id="kpiPending" style="color:var(--danger);">-</span><span class="delta" id="kpiDeltaPending"></span></div>
+      <span class="hint" id="kpiHintPending">对比上周</span>
+      <div class="spark-wrap"><canvas id="sparkPending"></canvas></div>
     </div>
-    <div class="kpi">
-      <span class="lbl">解决中</span>
-      <div class="row"><span class="val" id="kpiResolving">-</span></div>
-      <span class="hint">正在处理</span>
-    </div>
-    <div class="kpi">
+    <div class="kpi-card" data-kpi="resolved">
       <span class="lbl">已解决</span>
-      <div class="row"><span class="val" id="kpiResolved">-</span></div>
-      <span class="hint">已完成</span>
+      <div class="row"><span class="val" id="kpiResolved" style="color:oklch(0.42 0.12 155);">-</span><span class="delta" id="kpiDeltaResolved"></span></div>
+      <span class="hint" id="kpiHintResolved">对比上周</span>
+      <div class="spark-wrap"><canvas id="sparkResolved"></canvas></div>
     </div>
   </div>
 
@@ -849,14 +936,15 @@ table.tbl {
         <thead>
           <tr>
             <th style="width:36px;"><span class="ck" id="ckAll"></span></th>
-            <th style="width:100px;">类型</th>
+            <th style="width:90px;">类型</th>
             <th>描述</th>
-            <th style="width:100px;">空间</th>
-            <th style="width:170px;">提交人</th>
-            <th style="width:180px;">所属部门</th>
+            <th style="width:90px;">空间</th>
+            <th style="width:160px;">提交人</th>
+            <th style="width:140px;">所属部门</th>
+            <th style="width:100px;">岗位</th>
             <th style="width:140px;">时间</th>
             <th style="width:110px;">状态</th>
-            <th style="width:72px;"></th>
+            <th style="width:60px;"></th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -910,7 +998,6 @@ table.tbl {
 
 <script>
   const API_BASE_URL = window.location.origin;
-  const PASSWORD_KEY = 'admin_password';
 
   // 用户部门查询配置
   const UIC_API_BASE = 'https://toca.17u.cn/open-api/uic-apis/member/fuzzy-search';
@@ -934,63 +1021,148 @@ table.tbl {
     '已解决': { cls: 'resolved' }
   };
 
-  // 密码验证
-  window.onload = function() {
-    const savedPassword = localStorage.getItem(PASSWORD_KEY);
-    if (savedPassword) verifyPassword(savedPassword);
-  };
-
-  document.getElementById('pwInput').addEventListener('keypress', e => {
-    if (e.key === 'Enter') verifyPassword();
-  });
-
-  async function verifyPassword(password) {
-    const inputPassword = password || document.getElementById('pwInput').value;
-    const errorEl = document.getElementById('pwError');
+  // 检查登录状态（通过 cookie）
+  window.onload = async function() {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/feedback/stats`, {
-        headers: { 'Admin-Password': inputPassword }
-      });
-      if (response.ok) {
-        localStorage.setItem(PASSWORD_KEY, inputPassword);
-        document.getElementById('pwModal').classList.add('hidden');
+      const res = await fetch(`${API_BASE_URL}/api/feedback/stats`, { credentials: 'include' });
+      if (res.ok) {
+        document.getElementById('loginOverlay').style.display = 'none';
         document.getElementById('mainContent').style.display = 'block';
         loadStats();
         loadFeedbackList();
-      } else {
-        errorEl.textContent = '密码错误，请重试';
-        localStorage.removeItem(PASSWORD_KEY);
       }
-    } catch (error) {
-      errorEl.textContent = '验证失败，请检查网络';
-    }
+    } catch (e) {}
+  };
+
+  function logout() {
+    window.location.href = '/api/admin/auth/logout';
+  }
+
+  // 绘制迷你折线图
+  function drawSparkline(canvasId, data, color) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    const w = rect.width;
+    const h = rect.height;
+
+    const max = Math.max(...data, 1);
+    const min = Math.min(...data, 0);
+    const range = max - min || 1;
+    const pad = 2;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 0.8;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+
+    data.forEach((v, i) => {
+      const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((v - min) / range) * (h - pad * 2);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
   }
 
   // 加载统计
   async function loadStats() {
     try {
-      const password = localStorage.getItem(PASSWORD_KEY);
-      const response = await fetch(`${API_BASE_URL}/api/feedback/stats`, {
-        headers: { 'Admin-Password': password }
-      });
-      if (!response.ok) return;
-      const result = await response.json();
-      if (result.success) {
-        document.getElementById('kpiTotal').textContent = result.total || 0;
-        document.getElementById('kpiPending').textContent = result.by_status?.['收集中'] || 0;
-        document.getElementById('kpiResolving').textContent = result.by_status?.['解决中'] || 0;
-        document.getElementById('kpiResolved').textContent = result.by_status?.['已解决'] || 0;
+      const [overviewRes, trendRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/stats/overview`, { credentials: 'include' }),
+        fetch(`${API_BASE_URL}/api/stats/weekly-trend`, { credentials: 'include' })
+      ]);
+
+      const overview = await overviewRes.json();
+      const trendData = trendRes.ok ? await trendRes.json() : { trend: [] };
+
+      if (overview.success) {
+        // 总反馈 — 显示差值
+        document.getElementById('kpiTotal').textContent = overview.total.value;
+        setDeltaAbs('kpiDeltaTotal', overview.total.delta);
+
+        // 本周新增 — 显示差值
+        document.getElementById('kpiNew').textContent = overview.new_count.value;
+        setDeltaAbs('kpiDeltaNew', overview.new_count.delta);
+
+        // 待处理 — 显示差值
+        document.getElementById('kpiPending').textContent = overview.pending.value;
+        setDeltaAbs('kpiDeltaPending', overview.pending.delta);
+
+        // 已解决 — 显示差值
+        document.getElementById('kpiResolved').textContent = overview.resolved.value;
+        setDeltaAbs('kpiDeltaResolved', overview.resolved.delta);
+      }
+
+      // 处理本周新增副文字 + 绘制折线图
+      if (trendData.success && trendData.trend.length) {
+        const trend = trendData.trend;
+
+        // 本周（最后一周，可能未满7天）的单日最高新增
+        const now = new Date();
+        const dayOfWeek = now.getDay() || 7;
+        const thisWeekDays = trend.slice(-dayOfWeek);
+        const dailyNewCounts = thisWeekDays.map(d => d.new_count);
+        const maxDailyNew = Math.max(...dailyNewCounts);
+        if (overview.new_count.value > 0) {
+          document.getElementById('kpiHintNew').textContent = `单日最高 ${maxDailyNew} 条`;
+        } else {
+          document.getElementById('kpiHintNew').textContent = '暂无数据';
+        }
+
+        // 按周分组（4周，每组7天）
+        const weeks = [];
+        for (let i = 0; i < 4; i++) {
+          const slice = trend.slice(i * 7, i * 7 + 7);
+          weeks.push({
+            new_count: slice.reduce((s, d) => s + d.new_count, 0),
+            pending: slice.reduce((s, d) => s + d.pending, 0),
+            resolved: slice.reduce((s, d) => s + d.resolved, 0)
+          });
+        }
+
+        // 总反馈趋势：累计值
+        let cumulative = 0;
+        const totalWeeks = weeks.map(w => { cumulative += w.new_count; return cumulative; });
+
+        drawSparkline('sparkTotal', totalWeeks, 'oklch(0.55 0.13 75)');
+        drawSparkline('sparkNew', weeks.map(w => w.new_count), 'oklch(0.42 0.12 155)');
+        drawSparkline('sparkPending', weeks.map(w => w.pending), 'oklch(0.65 0.15 25)');
+        drawSparkline('sparkResolved', weeks.map(w => w.resolved), 'oklch(0.42 0.12 155)');
       }
     } catch (error) {
       console.error('加载统计失败:', error);
     }
   }
 
+  // 环比：显示绝对差值
+  function setDeltaAbs(elId, delta) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (delta === 0) {
+      el.textContent = '暂无对比数据';
+      el.className = 'delta';
+      el.style.color = 'var(--ink-4)';
+      el.style.background = 'transparent';
+      return;
+    }
+    const isUp = delta > 0;
+    const arrow = isUp ? '↑' : '↓';
+    el.textContent = `${arrow} ${Math.abs(delta)}`;
+    el.className = `delta ${isUp ? 'up' : 'down'}`;
+    el.style = '';
+  }
+
   // 加载列表
   async function loadFeedbackList() {
-    const password = localStorage.getItem(PASSWORD_KEY);
     const tbody = document.getElementById('tbody');
-    tbody.innerHTML = '<tr><td colspan="9" class="loading-state">加载中…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="loading-state">加载中…</td></tr>';
 
     try {
       let url = `${API_BASE_URL}/api/feedback/list?page=${currentPage}&page_size=15`;
@@ -1004,9 +1176,9 @@ table.tbl {
       if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
       if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
 
-      const response = await fetch(url, { headers: { 'Admin-Password': password } });
+      const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) {
-        if (response.status === 401) { localStorage.removeItem(PASSWORD_KEY); location.reload(); }
+        if (response.status === 401) { location.reload(); }
         return;
       }
       const result = await response.json();
@@ -1018,7 +1190,7 @@ table.tbl {
       }
     } catch (error) {
       console.error('加载列表失败:', error);
-      tbody.innerHTML = '<tr><td colspan="9" class="loading-state">加载失败，请刷新重试</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="loading-state">加载失败，请刷新重试</td></tr>';
     }
   }
 
@@ -1031,6 +1203,12 @@ table.tbl {
     const d = new Date(dateStr);
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function formatShortTime(dateStr) {
+    const d = new Date(dateStr);
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   function escapeHtml(text) {
@@ -1099,7 +1277,7 @@ table.tbl {
   function renderTable(list) {
     const tbody = document.getElementById('tbody');
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="loading-state">暂无反馈数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="loading-state">暂无反馈数据</td></tr>';
       return;
     }
 
@@ -1111,8 +1289,8 @@ table.tbl {
       <tr data-id="${item.id}">
         <td><span class="ck row-ck" data-id="${item.id}"></span></td>
         <td><span class="type-tag ${tc}">${escapeHtml(item.issue_type)}</span></td>
-        <td class="desc-cell">${escapeHtml(item.description)}${item.images && item.images.length ? `<span class="imgs-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>${item.images.length}</span>` : ''}</td>
-        <td>${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : '<span style="color:var(--ink-4);font-size:12px;">-</span>'}</td>
+        <td class="desc-cell" title="${escapeHtml(item.description)}">${escapeHtml(item.description)}${item.images && item.images.length ? `<span class="imgs-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>${item.images.length}</span>` : ''}</td>
+        <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : '<span style="color:var(--ink-4);font-size:12px;">-</span>'}</td>
         <td>
           <div class="user-cell">
             <span class="av">${escapeHtml(u.initial)}</span>
@@ -1122,7 +1300,8 @@ table.tbl {
             </div>
           </div>
         </td>
-        <td style="font-size:12px; color:var(--ink-3); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${getDeptDisplay(item)}">${getDeptDisplay(item)}</td>
+        <td style="font-size:12px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${getDeptDisplay(item)}">${getDeptDisplay(item)}</td>
+        <td style="font-size:12px; color:var(--ink-3); min-width:80px; white-space:nowrap;">${item.position ? escapeHtml(item.position) : '<span style="color:var(--ink-4);">—</span>'}</td>
         <td class="time-cell">${formatDateTime(item.created_at)}</td>
         <td>
           <div class="status-sel" data-item-id="${item.id}">
@@ -1183,16 +1362,16 @@ table.tbl {
 
   // 修改状态
   async function changeStatus(id, newStatus, selEl) {
-    const password = localStorage.getItem(PASSWORD_KEY);
     try {
       const response = await fetch(`${API_BASE_URL}/api/feedback/update-status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Admin-Password': password },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id, status: newStatus })
       });
       const result = await response.json();
       if (result.success) {
-        loadFeedbackList();
+        await loadFeedbackList();
         loadStats();
       } else {
         alert(result.message || '更新失败');
@@ -1232,11 +1411,11 @@ table.tbl {
   async function batchSetStatus(status) {
     const ids = [...document.querySelectorAll('.row-ck.checked')].map(c => parseInt(c.dataset.id));
     if (ids.length === 0) return;
-    const password = localStorage.getItem(PASSWORD_KEY);
     for (const id of ids) {
       await fetch(`${API_BASE_URL}/api/feedback/update-status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Admin-Password': password },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id, status })
       });
     }
@@ -1323,6 +1502,174 @@ table.tbl {
 
   function goToPage(page) { currentPage = page; loadFeedbackList(); }
 
+  // 评论相关
+  let commentFiles = [];
+
+  // 加载评论
+  async function loadComments(feedbackId) {
+    const container = document.getElementById('timelineContainer');
+    if (!container) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/feedbacks/${feedbackId}/comments`, {
+        credentials: 'include'
+      });
+      const result = await response.json();
+      if (!result.success || !result.comments.length) {
+        container.innerHTML = `<div class="timeline-empty">
+          <div class="timeline-empty-icon">📋</div>
+          <div class="timeline-empty-text">暂无处理记录</div>
+        </div>`;
+        return;
+      }
+      const statusCls = { '收集中': 'collecting', '解决中': 'solving', '已解决': 'done' };
+      const statusIcon = { '收集中': '📥', '解决中': '🔄', '已解决': '✅' };
+      container.innerHTML = result.comments.map(c => {
+        const initial = c.user_name ? c.user_name.charAt(0) : '管';
+        const timeStr = formatShortTime(c.created_at);
+        if (c.type === 'status_change') {
+          const snap = c.status_snapshot ? JSON.parse(c.status_snapshot) : null;
+          const toStatus = snap ? snap.to : '';
+          const cls = statusCls[toStatus] || 'solving';
+          const icon = statusIcon[toStatus] || '🔄';
+          return `
+          <div class="timeline-item">
+            <div class="timeline-avatar-wrap">
+              <div class="timeline-avatar-sm">${escapeHtml(initial)}</div>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-meta">
+                <span class="timeline-name">${escapeHtml(c.user_name)}</span>
+                <span class="timeline-action">将状态改为</span>
+                <span class="timeline-status-change ${cls}">${icon} ${escapeHtml(toStatus)}</span>
+                <span class="timeline-time">${timeStr}</span>
+              </div>
+            </div>
+          </div>`;
+        } else {
+          const imgs = c.images ? JSON.parse(c.images) : [];
+          return `
+          <div class="timeline-item">
+            <div class="timeline-avatar-wrap">
+              <div class="timeline-avatar-sm">${escapeHtml(initial)}</div>
+            </div>
+            <div class="timeline-content">
+              <div class="timeline-meta">
+                <span class="timeline-name">${escapeHtml(c.user_name)}</span>
+                <span class="timeline-action">添加了备注</span>
+                <span class="timeline-time">${timeStr}</span>
+              </div>
+              ${c.content ? `<div class="timeline-bubble">${escapeHtml(c.content)}</div>` : ''}
+              ${imgs.length ? `
+              <div class="timeline-images">
+                ${imgs.map((img, i) => `<img class="img-thumb" src="${API_BASE_URL}/data/uploads/${img}" onclick="openImageModal(${JSON.stringify(imgs).replace(/"/g, '&quot;')}, ${i})" />`).join('')}
+              </div>` : ''}
+            </div>
+          </div>`;
+        }
+      }).join('');
+      const body = document.getElementById('drawerBody');
+      if (body) body.scrollTop = body.scrollHeight;
+    } catch (error) {
+      console.error('加载评论失败:', error);
+      container.innerHTML = '<div style="padding:12px 0; font-size:12px; color:var(--ink-4);">加载失败</div>';
+    }
+  }
+
+  // 提交评论
+  async function submitComment(feedbackId) {
+    const input = document.getElementById('commentInput');
+    const content = input.value.trim();
+    if (!content && commentFiles.length === 0) {
+      showToast('请输入备注或添加图片', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('commentSubmitBtn');
+    btn.textContent = '提交中…';
+    btn.disabled = true;
+
+    try {
+      // 上传图片
+      const imagePaths = [];
+      for (const file of commentFiles) {
+        const fd = new FormData();
+        fd.append('image', file);
+        const uploadResp = await fetch(`${API_BASE_URL}/api/upload-comment-image`, {
+          method: 'POST',
+          credentials: 'include',
+          body: fd
+        });
+        const uploadResult = await uploadResp.json();
+        if (uploadResult.success && uploadResult.filename) {
+          imagePaths.push(uploadResult.filename);
+        }
+      }
+
+      const resp = await fetch(`${API_BASE_URL}/api/feedbacks/${feedbackId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          content,
+          images: imagePaths,
+          user_name: '管理员'
+        })
+      });
+      const result = await resp.json();
+      if (result.success) {
+        input.value = '';
+        commentFiles = [];
+        document.getElementById('commentPreview').innerHTML = '';
+        const sb = document.getElementById('commentSubmitBtn');
+        if (sb) sb.disabled = true;
+        loadComments(feedbackId);
+      } else {
+        showToast(result.message || '提交失败', 'error');
+      }
+    } catch (error) {
+      showToast('提交失败，请重试', 'error');
+    }
+
+    btn.textContent = '提交';
+    btn.disabled = false;
+  }
+
+  // 评论图片上传处理
+  function initCommentUpload() {
+    const fileInput = document.getElementById('commentFileInput');
+    const uploadBtn = document.getElementById('commentUploadBtn');
+    const preview = document.getElementById('commentPreview');
+    if (!uploadBtn) return;
+
+    uploadBtn.onclick = () => fileInput?.click();
+    fileInput.onchange = () => {
+      const files = Array.from(fileInput.files);
+      for (const f of files) {
+        if (!f.type.startsWith('image/')) continue;
+        if (commentFiles.length >= 3) break;
+        commentFiles.push(f);
+      }
+      renderCommentThumbs();
+      fileInput.value = '';
+    };
+
+    window.renderCommentThumbs = function() {
+      preview.innerHTML = '';
+      commentFiles.forEach((f, i) => {
+        const r = new FileReader();
+        r.onload = e => {
+          const div = document.createElement('div');
+          div.className = 'thumb';
+          div.innerHTML = `<img src="${e.target.result}" /><button class="x" type="button">×</button>`;
+          div.querySelector('.x').onclick = () => { commentFiles.splice(i, 1); renderCommentThumbs(); if (window.updateCommentSubmitState) window.updateCommentSubmitState(); };
+          preview.appendChild(div);
+        };
+        r.readAsDataURL(f);
+      });
+      if (window.updateCommentSubmitState) window.updateCommentSubmitState();
+    };
+  }
+
   // 抽屉
   function openDrawer(id) {
     drawerItemId = id;
@@ -1330,14 +1677,20 @@ table.tbl {
     if (!item) return;
     const s = STATUS_META[item.status] || STATUS_META['收集中'];
     const tc = getTypeClass(item.issue_type);
+    const initial = parseUserName(item.user_name).initial;
+    const dept = getDeptDisplay(item);
+    const statusCls = { '收集中': 'collecting', '解决中': 'solving', '已解决': 'done' };
+    const sc = statusCls[item.status] || 'collecting';
 
     document.getElementById('drawerId').textContent = '#' + String(item.id).padStart(4,'0');
     document.getElementById('drawerBody').innerHTML = `
+      <!-- Meta bar -->
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <span class="type-tag ${tc}">${escapeHtml(item.issue_type)}</span>
         ${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : ''}
         <span style="font-size:12px; color:var(--ink-4); margin-left:auto; font-family:var(--font-mono);">${formatDateTime(item.created_at)}</span>
       </div>
+      <!-- Description -->
       <div class="field">
         <span class="flabel">问题描述</span>
         <div class="desc-block">${escapeHtml(item.description)}</div>
@@ -1349,36 +1702,73 @@ table.tbl {
           ${item.images.map((img,i) => `<img src="${API_BASE_URL}/data/uploads/${img}" onclick="openImageModal(${JSON.stringify(item.images).replace(/"/g,'&quot;')}, ${i})" />`).join('')}
         </div>
       </div>` : ''}
+      <!-- Info grid -->
       <div class="field">
-        <span class="flabel">提交人</span>
-        <div class="fvalue" style="display:flex; align-items:center; gap:8px;">
-          <span class="av" style="width:24px;height:24px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:linear-gradient(135deg,oklch(0.75 0.1 180),oklch(0.55 0.14 220));color:#fff;font-weight:600;">${escapeHtml(parseUserName(item.user_name).initial)}</span>
-          ${escapeHtml(parseUserName(item.user_name).display)}
-          ${item.contact ? `<span style="color:var(--ink-3); font-size:12px;">· ${escapeHtml(item.contact)}</span>` : ''}
-        </div>
-      </div>
-      <div class="field">
-        <span class="flabel">所属部门</span>
-        <div class="fvalue" style="font-size:13px; color:var(--ink-3);">${getDeptDisplay(item)}</div>
-      </div>
-      <div class="field">
-        <span class="flabel">状态</span>
-        <div class="status-sel" data-item-id="${item.id}" style="position:static;">
-          <button class="status-btn ${s.cls}" data-status-btn>${item.status || '收集中'}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <div class="status-menu">
-            <div class="opt" data-set="收集中"><span class="d" style="background:oklch(0.45 0.11 240);"></span>收集中</div>
-            <div class="opt" data-set="解决中"><span class="d" style="background:oklch(0.48 0.13 75);"></span>解决中</div>
-            <div class="opt" data-set="已解决"><span class="d" style="background:oklch(0.42 0.12 155);"></span>已解决</div>
+        <span class="flabel">基本信息</span>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="label">提交人</span>
+            <div class="submitter-row">
+              <div class="submitter-avatar">${escapeHtml(initial)}</div>
+              <div>
+                <div class="submitter-name">${escapeHtml(parseUserName(item.user_name).display)}</div>
+                ${item.contact ? `<div class="submitter-id">${escapeHtml(item.contact)}</div>` : ''}
+              </div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="label">所属部门</span>
+            <span class="value">${escapeHtml(dept)}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">岗位</span>
+            <span class="value">${item.position ? escapeHtml(item.position) : '<span style="color:var(--ink-4);">—</span>'}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">当前状态</span>
+            <div class="status-sel" data-item-id="${item.id}">
+              <button class="status-btn ${s.cls}" data-status-btn>${item.status || '收集中'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div class="status-menu">
+                <div class="opt" data-set="收集中"><span class="d" style="background:oklch(0.45 0.11 240);"></span>收集中</div>
+                <div class="opt" data-set="解决中"><span class="d" style="background:oklch(0.48 0.13 75);"></span>解决中</div>
+                <div class="opt" data-set="已解决"><span class="d" style="background:oklch(0.42 0.12 155);"></span>已解决</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
       ${item.device_info ? `
       <div class="field">
         <span class="flabel">设备信息</span>
-        <div class="fvalue" style="font-size:12px; color:var(--ink-3); font-family:var(--font-mono);">${escapeHtml(item.device_info)}</div>
-      </div>` : ''}`;
+        <div class="device-info">${escapeHtml(item.device_info)}</div>
+      </div>` : ''}
+      <!-- Timeline -->
+      <div class="timeline-section">
+        <div class="ttl">处理记录</div>
+        <div class="timeline" id="timelineContainer">
+          <div class="loading-state" style="padding:12px 0;">加载中…</div>
+        </div>
+      </div>
+      <!-- Comment card -->
+      <div class="field">
+        <span class="flabel">添加备注</span>
+        <div class="comment-box">
+          <textarea class="comment-textarea" id="commentInput" placeholder="记录处理过程、结论或补充说明…"></textarea>
+          <input type="file" id="commentFileInput" accept="image/*" multiple style="display:none;" />
+          <div class="comment-preview" id="commentPreview"></div>
+          <div class="comment-toolbar">
+            <div class="comment-toolbar-left">
+              <button class="comment-upload" id="commentUploadBtn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                添加图片
+              </button>
+            </div>
+            <button class="comment-submit-btn" id="commentSubmitBtn" disabled>提交</button>
+          </div>
+        </div>
+      </div>`;
 
     // 状态下拉
     const sel = document.getElementById('drawerBody').querySelector('.status-sel');
@@ -1389,10 +1779,12 @@ table.tbl {
       sel.classList.toggle('open');
     };
     sel.querySelectorAll('.opt').forEach(opt => {
-      opt.onclick = e => {
+      opt.onclick = async e => {
         e.stopPropagation();
-        changeStatus(item.id, opt.dataset.set, sel);
-        closeDrawer();
+        const newStatus = opt.dataset.set;
+        const itemId = parseInt(sel.dataset.itemId);
+        await changeStatus(itemId, newStatus, sel);
+        if (drawerItemId === itemId) openDrawer(itemId); // 刷新详情面板
       };
     });
 
@@ -1402,20 +1794,37 @@ table.tbl {
     const ns = nextStatus[item.status];
     if (ns) {
       resolveBtn.textContent = `标为${ns}`;
-      resolveBtn.onclick = () => { changeStatus(item.id, ns); closeDrawer(); };
+      resolveBtn.onclick = async () => { await changeStatus(item.id, ns); openDrawer(item.id); };
     } else {
       resolveBtn.textContent = '已完成';
       resolveBtn.disabled = true;
     }
+
+    // 加载评论
+    loadComments(item.id);
+    initCommentUpload();
+
+    // 评论提交
+    const submitBtn = document.getElementById('commentSubmitBtn');
+    const commentInput = document.getElementById('commentInput');
+    submitBtn.onclick = () => submitComment(item.id);
+    commentInput.oninput = () => {
+      submitBtn.disabled = commentInput.value.trim() === '' && commentFiles.length === 0;
+    };
+    // 更新 submit 按钮状态（图片上传后也要触发）
+    window.updateCommentSubmitState = function() {
+      submitBtn.disabled = commentInput.value.trim() === '' && commentFiles.length === 0;
+    };
 
     document.getElementById('scrim').classList.add('show');
     document.getElementById('drawer').classList.add('show');
   }
 
   function closeDrawer() {
+    commentFiles = [];
+    drawerItemId = null;
     document.getElementById('scrim').classList.remove('show');
     document.getElementById('drawer').classList.remove('show');
-    drawerItemId = null;
   }
 
   document.getElementById('scrim').onclick = closeDrawer;
@@ -1497,12 +1906,8 @@ table.tbl {
     }, 2500);
   }
 
-  // 退出
-  function logout() { localStorage.removeItem(PASSWORD_KEY); location.reload(); }
-
   // 导出
   async function exportToExcel() {
-    const password = localStorage.getItem(PASSWORD_KEY);
     try {
       let url = `${API_BASE_URL}/api/feedback/export?`;
       if (currentTypeFilter !== 'all') url += `issue_type=${encodeURIComponent(currentTypeFilter)}&`;
@@ -1515,9 +1920,9 @@ table.tbl {
       if (startDate) url += `start_date=${encodeURIComponent(startDate)}&`;
       if (endDate) url += `end_date=${encodeURIComponent(endDate)}&`;
 
-      const response = await fetch(url, { headers: { 'Admin-Password': password } });
+      const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) {
-        if (response.status === 401) { alert('密码已过期'); localStorage.removeItem(PASSWORD_KEY); location.reload(); }
+        if (response.status === 401) { alert('会话已过期，请重新登录'); location.reload(); }
         else alert('导出失败');
         return;
       }
