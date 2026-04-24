@@ -4,7 +4,9 @@
  */
 
 // 加载环境变量
-require('dotenv').config();
+require('dotenv').config({
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development'
+});
 
 const http = require('http');
 const https = require('https');
@@ -37,9 +39,6 @@ const CONFIG = {
   // 服务绑定地址
   HOST: process.env.HOST || 'localhost',
 
-  // 管理后台工号白名单（逗号分隔）
-  ADMIN_EMPLOYEE_NOS: (process.env.ADMIN_EMPLOYEE_NOS || '1223489').split(',').map(s => s.trim()),
-
   // 数据目录
   DATA_DIR: './data',
   UPLOAD_DIR: './data/uploads',
@@ -60,14 +59,17 @@ const CONFIG = {
   TOCA_REFRESH_USER_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/v2/user-token/refresh',
 
   // ===== toca IM 通知配置 =====
-  TOCA_NOTIFY_USER_ID: '1223489',   // 接收通知的用户ID（工号或memberUniqueId）
-  TOCA_NOTIFY_USER_TYPE: 2,          // 2=工号 4=memberUniqueId
+  TOCA_NOTIFY_USER_ID: process.env.TOCA_NOTIFY_USER_ID || '1223489',   // 接收通知的用户ID（工号或memberUniqueId）
+  TOCA_NOTIFY_USER_TYPE: parseInt(process.env.TOCA_NOTIFY_USER_TYPE || '2', 10), // 2=工号 4=memberUniqueId
 
   // ===== 管理后台地址 =====
   ADMIN_URL: process.env.ADMIN_URL || 'http://localhost:3001/admin.html',
 
   // ===== CORS 配置 =====
   CORS_ALLOWED_ORIGINS: (process.env.CORS_ALLOWED_ORIGINS || '*').split(',').map(s => s.trim()),
+
+  // ===== Kimi AI 配置 =====
+  KIMI_API_KEY: process.env.KIMI_API_KEY || '',
 };
 
 // toca Token 缓存
@@ -142,6 +144,16 @@ function initDatabase() {
 
   // 为旧评论数据添加 type 字段
   db.run(`ALTER TABLE feedback_comments ADD COLUMN type TEXT DEFAULT 'comment'`, () => {});
+
+  // 管理员配置表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_config (
+      key TEXT PRIMARY KEY,
+      value TEXT DEFAULT ''
+    )
+  `, () => {});
+  // 初始化管理员配置表（超级管理员固定为 1223489，普通管理员列表初始为空）
+  db.run(`INSERT OR IGNORE INTO admin_config (key, value) VALUES ('admin_employee_nos', '')`, () => {});
 
   console.log(`[${formatDate()}] 数据库初始化完成: ${dbPath}`);
 }
@@ -226,16 +238,17 @@ function formatDate(date = new Date()) {
  */
 function resolveCorsOrigins(req) {
   const origins = CONFIG.CORS_ALLOWED_ORIGINS;
-  if (origins.includes('*')) return '*';
+  if (origins.includes('*')) return req.headers.origin || 'http://localhost:3001';
   const origin = req.headers.origin;
   if (origin && origins.includes(origin)) return origin;
-  return origins[0] || '*';
+  return origins[0] || 'http://localhost:3001';
 }
 
 function setCORS(res, allowedOrigin = '*') {
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
 
 function sendJSON(res, statusCode, data) {
@@ -369,7 +382,7 @@ setInterval(async () => {
 }, 110 * 60 * 1000);
 
 // 发送 toca IM 通知
-async function sendTocaNotification({ issue_type, description, memberName, outerMemberId, employeeNo, space }) {
+async function sendTocaNotification({ issue_type, description, memberName, outerMemberId, employeeNo, space, reqHost }) {
   if (!CONFIG.TOCA_NOTIFY_USER_ID) return;
 
   try {
@@ -381,6 +394,10 @@ async function sendTocaNotification({ issue_type, description, memberName, outer
     const desc = (description || '').length > 100
       ? (description || '').substring(0, 100) + '…'
       : (description || '');
+
+    // 通知里的后台链接：本地请求用 localhost，线上请求用配置的 ADMIN_URL
+    const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
+    const adminUrl = isLocal ? `http://${reqHost}/admin.html` : CONFIG.ADMIN_URL;
 
     const cardContent = JSON.stringify({
       notify_title: '贴心 Claw 收到一条新用户反馈',
@@ -423,7 +440,7 @@ async function sendTocaNotification({ issue_type, description, memberName, outer
               content: `问题描述：${desc}`
             }
           },
-          ...(CONFIG.ADMIN_URL ? [{
+          {
             tag: 'action',
             actions: [{
               tag: 'button',
@@ -431,12 +448,12 @@ async function sendTocaNotification({ issue_type, description, memberName, outer
                 tag: 'lark_md',
                 content: '进入后台'
               },
-              url: CONFIG.ADMIN_URL,
+              url: adminUrl,
               type: 'default',
               destination: 'external',
               loading: true
             }]
-          }] : [])
+          }
         ]
       }
     });
@@ -566,6 +583,10 @@ async function fetchMemberInfo(sessionId) {
 
 async function fetchMemberName(sessionId) {
   const result = await fetchMemberInfo(sessionId);
+  const session = userSessions.get(sessionId);
+  if (session && result.memberName) {
+    session.name = result.memberName;
+  }
   return result.memberName;
 }
 
@@ -627,7 +648,8 @@ async function serveStatic(req, res, filePath) {
 async function handleTocaLogin(req, res) {
   try {
     const state = generateUUID();
-    const redirectUri = encodeURIComponent(CONFIG.TOCA_REDIRECT_URI);
+    const reqHost = req.headers.host || `localhost:${CONFIG.PORT}`;
+    const redirectUri = encodeURIComponent(`http://${reqHost}/api/auth/callback`);
 
     oauthStates.set(state, { createdAt: Date.now() });
 
@@ -731,8 +753,9 @@ async function handleAdminTocaLogin(req, res) {
     const state = generateUUID();
     oauthStates.set(state, { createdAt: Date.now() });
 
-    const isProd = CONFIG.HOST !== 'localhost' && !CONFIG.HOST.includes('127.0.0.1');
-    const callbackBase = isProd ? CONFIG.ADMIN_URL.replace('/admin.html', '') : `http://localhost:3001`;
+    const reqHost = req.headers.host || `localhost:${CONFIG.PORT}`;
+    const isLocal = reqHost.includes('localhost') || reqHost.includes('127.0.0.1');
+    const callbackBase = isLocal ? `http://${reqHost}` : CONFIG.ADMIN_URL.replace('/admin.html', '');
     const redirectUri = `${callbackBase}/api/admin/auth/callback`;
     const authUrl = `${CONFIG.TOCA_OAUTH_AUTHORIZE_URL}?agentId=${CONFIG.TOCA_AGENT_ID}&redirectUri=${encodeURIComponent(redirectUri)}&state=${state}`;
 
@@ -770,9 +793,10 @@ async function handleAdminTocaCallback(req, res) {
     const userData = response.data.data;
     const employeeNo = userData.employeeNo;
 
-    // 检查工号白名单
-    if (!CONFIG.ADMIN_EMPLOYEE_NOS.includes(employeeNo)) {
-      return renderErrorPage(res, '无管理权限', `工号 ${employeeNo} 未被授权为管理员，请联系系统管理员配置`);
+    // 检查工号白名单（超级管理员固定允许，普通管理员需在白名单中）
+    const isSuperAdmin = employeeNo === SUPER_ADMIN_EMPLOYEE_NO;
+    if (!isSuperAdmin && !getAdminEmployeeNos().includes(employeeNo)) {
+      return renderErrorPage(res, '无管理权限', `工号 ${employeeNo} 未被授权为管理员，请联系超级管理员配置`);
     }
 
     const sessionId = generateUUID();
@@ -810,7 +834,29 @@ async function handleAdminTocaCallback(req, res) {
   }
 }
 
-// 管理后台权限检查中间件
+// 超级管理员（固定，不可删除）
+const SUPER_ADMIN_EMPLOYEE_NO = '1223489';
+
+// 管理员工号白名单缓存（从数据库读取，仅包含普通管理员）
+let adminEmployeeNosCache = [];
+
+function getAdminEmployeeNos() {
+  return adminEmployeeNosCache;
+}
+
+async function refreshAdminCache() {
+  return new Promise((resolve) => {
+    db.get(`SELECT value FROM admin_config WHERE key = 'admin_employee_nos'`, (err, row) => {
+      if (!err && row && row.value) {
+        adminEmployeeNosCache = row.value.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      console.log(`[${formatDate()}] 管理员白名单已加载: 超级管理员=${SUPER_ADMIN_EMPLOYEE_NO}, 普通管理员=${adminEmployeeNosCache.length ? adminEmployeeNosCache.join(', ') : '无'}`);
+      resolve();
+    });
+  });
+}
+
+// 管理后台权限检查中间件 — 返回 { session, isSuperAdmin } 或 null
 function checkAdminAuth(req, res) {
   const cookie = req.headers.cookie;
   if (!cookie) return null;
@@ -827,7 +873,10 @@ function checkAdminAuth(req, res) {
   const session = userSessions.get(sessionId);
   if (!session || !session.isAdmin) return null;
 
-  return session;
+  const isSuperAdmin = session.employeeNo === SUPER_ADMIN_EMPLOYEE_NO;
+  if (!isSuperAdmin && !adminEmployeeNosCache.includes(session.employeeNo)) return null;
+
+  return { session, isSuperAdmin };
 }
 
 // 管理后台退出
@@ -849,6 +898,50 @@ function handleAdminLogout(req, res) {
     'Set-Cookie': clearCookie
   });
   res.end();
+}
+
+// ==================== 管理员配置管理 ====================
+// GET /api/admin/config — 获取管理员配置
+function handleGetAdminConfig(req, res) {
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+
+  db.get(`SELECT value FROM admin_config WHERE key = 'admin_employee_nos'`, (err, row) => {
+    if (err) return sendError(res, '查询失败');
+    sendSuccess(res, {
+      admin_employee_nos: row?.value || '',
+      is_super_admin: auth.isSuperAdmin
+    });
+  });
+}
+
+// POST /api/admin/config — 更新普通管理员列表（仅超级管理员）
+function handleUpdateAdminConfig(req, res) {
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  if (!auth.isSuperAdmin) return sendError(res, '仅超级管理员可操作', 403);
+
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const { admin_employee_nos } = JSON.parse(body);
+      if (typeof admin_employee_nos !== 'string') return sendError(res, '参数错误', 400);
+
+      const nos = admin_employee_nos.split(',').map(s => s.trim()).filter(Boolean);
+      // 过滤掉超级管理员工号
+      const regularNos = nos.filter(n => n !== SUPER_ADMIN_EMPLOYEE_NO);
+
+      db.run(`UPDATE admin_config SET value = ? WHERE key = 'admin_employee_nos'`, [regularNos.join(',')], function(err) {
+        if (err) return sendError(res, '保存失败');
+        // 热更新缓存
+        adminEmployeeNosCache = regularNos;
+        sendSuccess(res, { admin_employee_nos: regularNos.join(',') });
+      });
+    } catch (e) {
+      sendError(res, '请求格式错误', 400);
+    }
+  });
 }
 
 function renderErrorPage(res, title, message) {
@@ -874,7 +967,7 @@ function renderErrorPage(res, title, message) {
         <div class="icon">❌</div>
         <h2>${title}</h2>
         <p>${message}</p>
-        <a href="/" class="btn">返回重试</a>
+        <a href="/admin.html" class="btn">返回重试</a>
       </div>
     </body>
     </html>
@@ -1041,13 +1134,15 @@ async function handleSubmit(req, res) {
         console.log(`[${formatDate()}] 反馈提交成功: id=${this.lastID}, type=${issue_type}`);
 
         // 异步推送 toca IM 通知
+        const clientHost = req.headers.host || `localhost:${CONFIG.PORT}`;
         sendTocaNotification({
           issue_type,
           description,
           memberName: session.memberName,
           outerMemberId: session.outerMemberId,
           employeeNo: session.employeeNo,
-          space: space || ''
+          space: space || '',
+          reqHost: clientHost
         });
 
         sendSuccess(res, { id: this.lastID, message: '提交成功' });
@@ -1058,8 +1153,9 @@ async function handleSubmit(req, res) {
 
 // ==================== 查询接口 ====================
 function handleList(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
@@ -1157,8 +1253,9 @@ function handleList(req, res) {
 
 // ==================== 统计接口 ====================
 function handleStats(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   db.all(
     `SELECT issue_type, COUNT(*) as count FROM feedback GROUP BY issue_type`,
@@ -1197,8 +1294,9 @@ function handleStats(req, res) {
 
 // ==================== 数据概览接口 ====================
 function handleOverview(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const now = new Date();
   const dayOfWeek = now.getDay() || 7; // 1=周一, 7=周日
@@ -1265,8 +1363,9 @@ function handleOverview(req, res) {
 
 // ==================== 周趋势接口 ====================
 function handleWeeklyTrend(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const now = new Date();
   const dayOfWeek = now.getDay() || 7;
@@ -1320,11 +1419,254 @@ function handleWeeklyTrend(req, res) {
   );
 }
 
+// ==================== AI 对话接口 ====================
+// POST /api/ai/chat
+async function handleAiChat(req, res) {
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+
+  console.log('[AI] KIMI_API_KEY loaded:', CONFIG.KIMI_API_KEY ? 'YES (' + CONFIG.KIMI_API_KEY.substring(0, 10) + '...)' : 'NO');
+  if (!CONFIG.KIMI_API_KEY || CONFIG.KIMI_API_KEY === 'sk-xxx') {
+    return sendError(res, 'AI 功能未配置，请联系管理员设置 KIMI_API_KEY', 501);
+  }
+
+  try {
+    // Read request body
+    let body = '';
+    for await (const chunk of req) { body += chunk; }
+    console.log('[AI] Request body:', body);
+
+    let data;
+    try { data = JSON.parse(body); }
+    catch (e) { return sendError(res, '请求格式错误', 400); }
+
+    const userMessage = (data.message || '').trim();
+    if (!userMessage) return sendError(res, '消息内容不能为空', 400);
+
+    // 获取当前反馈数据统计数据作为上下文
+    const statsContext = await new Promise((resolve) => {
+      db.all(
+        `SELECT issue_type, COUNT(*) as count FROM feedback GROUP BY issue_type`,
+        (err, rows) => {
+          if (err) return resolve({ by_type: {}, total: 0 });
+          const stats = { by_type: {}, total: 0 };
+          rows.forEach(r => { stats.by_type[r.issue_type] = r.count; stats.total += r.count; });
+          resolve(stats);
+        }
+      );
+    });
+
+    const weekStats = await new Promise((resolve) => {
+      const now = new Date();
+      const dayOfWeek = now.getDay() || 7;
+      const thisWeekStart = new Date(now);
+      thisWeekStart.setDate(now.getDate() - dayOfWeek + 1);
+      thisWeekStart.setHours(0, 0, 0, 0);
+      const lastWeekStart = new Date(thisWeekStart);
+      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+      const thisWeekStr = thisWeekStart.toISOString().slice(0, 10);
+      const lastWeekStr = lastWeekStart.toISOString().slice(0, 10);
+
+      db.get(
+        `SELECT
+           COUNT(*) as total,
+           SUM(CASE WHEN date(created_at) >= ? THEN 1 ELSE 0 END) as this_week,
+           SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? THEN 1 ELSE 0 END) as last_week,
+           SUM(CASE WHEN date(created_at) >= ? AND status = '收集中' THEN 1 ELSE 0 END) as pending,
+           SUM(CASE WHEN date(created_at) >= ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved
+         FROM feedback`,
+        [thisWeekStr, lastWeekStr, thisWeekStr, thisWeekStr, thisWeekStr],
+        (err, row) => {
+          if (err || !row) return resolve({ total: 0, this_week: 0, last_week: 0, pending: 0, resolved: 0 });
+          resolve(row);
+        }
+      );
+    });
+
+    // 获取最近的反馈记录（最近20条）
+    const recentFeedback = await new Promise((resolve) => {
+      db.all(
+        `SELECT issue_type, description, status, created_at FROM feedback ORDER BY created_at DESC LIMIT 20`,
+        (err, rows) => {
+          resolve(err ? [] : rows);
+        }
+      );
+    });
+
+    // 获取上周各类型数量分布（用于对比分析）
+    const lastWeekByType = await new Promise((resolve) => {
+      const now = new Date();
+      const dayOfWeek = now.getDay() || 7;
+      const thisWeekStart = new Date(now);
+      thisWeekStart.setDate(now.getDate() - dayOfWeek + 1);
+      thisWeekStart.setHours(0, 0, 0, 0);
+      const lastWeekStart = new Date(thisWeekStart);
+      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+      const thisWeekStr = thisWeekStart.toISOString().slice(0, 10);
+      const lastWeekStr = lastWeekStart.toISOString().slice(0, 10);
+
+      db.all(
+        `SELECT issue_type, COUNT(*) as count FROM feedback WHERE date(created_at) >= ? AND date(created_at) < ? GROUP BY issue_type`,
+        [lastWeekStr, thisWeekStr],
+        (err, rows) => {
+          if (err) return resolve({});
+          const obj = {};
+          rows.forEach(r => { obj[r.issue_type] = r.count; });
+          resolve(obj);
+        }
+      );
+    });
+
+    // 获取本周各类型数量（用于分布计算）
+    const thisWeekByType = await new Promise((resolve) => {
+      const now = new Date();
+      const dayOfWeek = now.getDay() || 7;
+      const thisWeekStart = new Date(now);
+      thisWeekStart.setDate(now.getDate() - dayOfWeek + 1);
+      thisWeekStart.setHours(0, 0, 0, 0);
+      const thisWeekStr = thisWeekStart.toISOString().slice(0, 10);
+
+      db.all(
+        `SELECT issue_type, COUNT(*) as count FROM feedback WHERE date(created_at) >= ? GROUP BY issue_type`,
+        [thisWeekStr],
+        (err, rows) => {
+          if (err) return resolve({});
+          const obj = {};
+          rows.forEach(r => { obj[r.issue_type] = r.count; });
+          resolve(obj);
+        }
+      );
+    });
+
+    // 计算当前日期所在的月份及当月第几周（每月1号所在周为第1周）
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstDayOfWeek = firstDayOfMonth.getDay() || 7; // 周日=0转为7
+    const currentDay = now.getDate();
+    const currentWeekInMonth = Math.ceil((currentDay + firstDayOfWeek - 1) / 7);
+    const weekLabel = `${currentMonth}月第${currentWeekInMonth}周`;
+
+    // 构建对话历史
+    const conversationHistory = data.history || [];
+    const messages = [
+      {
+        role: 'system',
+        content: `你是"贴心Claw"的数据分析助手，基于真实的用户反馈数据回答问题。
+
+当前日期: ${weekLabel}
+
+## 数据概览（本周 vs 上周）
+总反馈: ${statsContext.total}
+本周新增: ${weekStats.this_week} 条 | 上周新增: ${weekStats.last_week} 条 | 变化: ${weekStats.this_week - weekStats.last_week}
+待处理: ${weekStats.pending} 条 | 上周待处理: 未知
+已解决: ${weekStats.resolved} 条 | 上周已解决: 未知
+本周问题分类: ${JSON.stringify(thisWeekByType)}
+上周问题分类: ${JSON.stringify(lastWeekByType)}
+全部历史分类: ${JSON.stringify(statsContext.by_type)}
+
+请用中文回答，回答要简洁专业。
+
+**当用户要求生成周报时，严格按以下 JSON 结构输出，禁止列出具体反馈描述文字：**
+{"type":"report","title":"${weekLabel}用户反馈周报","sections":[
+  {"key":"summary","title":"本周概况","content":"一句话判断性总结，指出趋势和问题，不要只复述数字"},
+  {"key":"stats","title":"核心数据","items":[
+    {"label":"总反馈","value":数值,"delta":对比上周变化,"deltaType":"up或down"},
+    {"label":"本周新增","value":数值,"delta":对比上周变化,"deltaType":"up或down"},
+    {"label":"待处理","value":数值,"delta":对比上周变化,"deltaType":"up或down"},
+    {"label":"已解决","value":数值,"delta":对比上周变化,"deltaType":"up或down"}
+  ]},
+  {"key":"distribution","title":"问题分布","items":[
+    {"label":"类型名","count":数量,"percent":百分比数值（如46.8，不要带%符号）}
+  ]},
+  {"key":"insights","title":"重点结论","items":["结论1，有数据支撑+判断","结论2","结论3"]},
+  {"key":"actions","title":"下周建议","items":["具体可执行行动项1","行动项2"]}
+]}
+
+**周报约束：**
+- 禁止列举任何具体的反馈描述文字
+- 禁止只复述数字而不给出判断和结论
+- 重点结论必须包含"问题判断 + 建议方向"
+- 下周建议必须是具体可执行的行动项
+- 标题必须使用"${weekLabel}用户反馈周报"格式，禁止使用占位符
+
+**对比分析约束：**
+- 生成对比结论时，若本周数据远大于上周（超过5倍），不要使用"是上周X倍"的表述，改为"较上周大幅增长，增加了X条"
+
+**问题类型颜色映射（分布分析 color 字段）：**
+- 体验建议 → #6B9668（绿）
+- 输出不准确 → #D4926A（橙）
+- BUG → #C05F4F（红）
+- 需求 → #6B8CAE（蓝）
+- 功能异常 → #8B7AA8（紫）
+- 其他 → #A89A8F（灰）
+- 其他 → #A89A8F（灰）
+
+**其他类型：**
+- 分布分析: {"type":"distribution","title":"标题","data":[{"label":"标签","value":数值,"color":"颜色（参考上方固定映射）"}]}
+- 对比分析: {"type":"comparison","title":"标题","before":{"label":"之前","items":[{"label":"标签","value":数值}]},"after":{"label":"之后","items":[{"label":"标签","value":数值}]},"summary":"总结"}
+- 数字指标: {"type":"number","value":数值,"label":"指标名","delta":变化值,"suffix":""}
+- 列表分析: {"type":"list","title":"标题","items":[{"tag":"标签","tagColor":"red|orange|green|blue","content":"内容"}]}
+- 文本回复: {"type":"text","content":"回复内容"}
+
+如果不是要求结构化数据，直接返回文本回复格式即可。只返回 JSON，不要有多余文字。`
+      },
+      ...conversationHistory.map(h => ({ role: h.role, content: h.content })),
+      { role: 'user', content: userMessage }
+    ];
+
+    try {
+      const kimiRes = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${CONFIG.KIMI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'kimi-k2.5',
+          messages,
+          temperature: 0.6,
+          max_tokens: 4000,
+          thinking: { type: 'disabled' }
+        })
+      });
+
+      if (!kimiRes.ok) {
+        const errText = await kimiRes.text();
+        console.error('Kimi API error:', kimiRes.status, errText);
+        return sendError(res, 'AI 服务调用失败，请稍后重试', 502);
+      }
+
+      const data = await kimiRes.json();
+      const reply = data.choices?.[0]?.message?.content || '(empty response)';
+      console.log('[AI] Kimi reply:', reply.substring(0, 200));
+
+      // Parse the JSON response
+      let parsed = null;
+      try {
+        const cleaned = reply.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        parsed = JSON.parse(cleaned);
+      } catch {
+        parsed = { type: 'text', content: reply };
+      }
+
+      sendSuccess(res, parsed);
+    } catch (e) {
+      console.error('[AI] Error:', e.message, e.stack);
+      sendError(res, 'AI 服务调用失败，请稍后重试', 502);
+    }
+  } catch (e) {
+    console.error('[AI] Top-level error:', e);
+    sendError(res, 'AI 服务调用失败，请稍后重试', 502);
+  }
+}
+
 // ==================== 评论接口 ====================
 // GET /api/feedbacks/:id/comments
 function handleGetComments(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const parsedUrl = url.parse(req.url, true);
   const segments = parsedUrl.pathname.split('/');
@@ -1345,8 +1687,9 @@ function handleGetComments(req, res) {
 
 // POST /api/feedbacks/:id/comments
 function handleCreateComment(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const parsedUrl = url.parse(req.url, true);
   const segments = parsedUrl.pathname.split('/');
@@ -1365,7 +1708,7 @@ function handleCreateComment(req, res) {
     const content = (data.content || '').trim();
     const images = data.images || [];
     const statusSnapshot = data.status_snapshot || '';
-    const userName = data.user_name || '管理员';
+    const userName = session.name;
 
     if (!content && images.length === 0) {
       return sendError(res, '备注内容不能为空', 400);
@@ -1388,8 +1731,9 @@ function handleCreateComment(req, res) {
 
 // 评论图片上传
 function handleCommentImageUpload(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const upload = multer({
     storage: multer.diskStorage({
@@ -1415,8 +1759,9 @@ function handleCommentImageUpload(req, res) {
 
 // ==================== 导出接口 ====================
 function handleExport(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
@@ -1520,8 +1865,9 @@ function escapeCsv(value) {
 
 // ==================== 状态更新接口 ====================
 function handleUpdateStatus(req, res) {
-  const session = checkAdminAuth(req, res);
-  if (!session) return sendError(res, '未授权，请先登录', 401);
+  const auth = checkAdminAuth(req, res);
+  if (!auth) return sendError(res, '未授权，请先登录', 401);
+  const session = auth.session;
 
   // 读取请求体
   let body = '';
@@ -1568,7 +1914,7 @@ function handleUpdateStatus(req, res) {
             db.run(
               `INSERT INTO feedback_comments (feedback_id, user_id, user_name, type, content, status_snapshot)
                VALUES (?, ?, ?, 'status_change', '', ?)`,
-              [id, 'admin', '管理员', JSON.stringify({ from: oldStatus, to: status })],
+              [id, 'admin', session.name, JSON.stringify({ from: oldStatus, to: status })],
               (err) => {
                 if (err) {
                   console.error(`[${formatDate()}] 记录状态变更失败:`, err);
@@ -1626,6 +1972,14 @@ const server = http.createServer(async (req, res) => {
       return handleAdminLogout(req, res);
     }
 
+    // 管理员配置
+    if (pathname === '/api/admin/config' && req.method === 'GET') {
+      return handleGetAdminConfig(req, res);
+    }
+    if (pathname === '/api/admin/config' && req.method === 'POST') {
+      return handleUpdateAdminConfig(req, res);
+    }
+
     if (pathname === '/api/user/info' && req.method === 'GET') {
       return await handleGetUserInfo(req, res);
     }
@@ -1653,6 +2007,11 @@ const server = http.createServer(async (req, res) => {
     // 周趋势接口
     if (pathname === '/api/stats/weekly-trend' && req.method === 'GET') {
       return handleWeeklyTrend(req, res);
+    }
+
+    // AI 对话接口
+    if (pathname === '/api/ai/chat' && req.method === 'POST') {
+      return handleAiChat(req, res);
     }
 
     // 导出接口
@@ -1733,6 +2092,9 @@ server.listen(CONFIG.PORT, async () => {
 
   // 初始化数据库
   initDatabase();
+
+  // 加载管理员配置缓存
+  await refreshAdminCache();
 
   // 初始化 toca Token
   await initTocaTokens();

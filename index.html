@@ -149,29 +149,6 @@ body {
   margin: 0;
   max-width: 42ch;
 }
-.hero .user-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 14px;
-  padding: 5px 10px 5px 5px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: var(--text-xs);
-  color: var(--ink-2);
-}
-.avatar {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, oklch(0.7 0.14 42), oklch(0.6 0.14 25));
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-}
 
 /* ---------- 卡片 ---------- */
 .card {
@@ -640,10 +617,6 @@ body {
     <div class="eyebrow">反馈中心</div>
     <h1>贴心Claw 用户反馈</h1>
     <p>每一条反馈都会被认真阅读，我们会尽快响应。</p>
-    <div class="user-pill" id="userPill" style="display:none;">
-      <span class="avatar" id="userAvatar"></span>
-      <span id="userName"></span>
-    </div>
   </div>
 
   <!-- 反馈表单 -->
@@ -802,11 +775,6 @@ body {
       const result = await response.json();
       if (result.success && result.loggedIn) {
         formPage.style.display = 'block';
-        if (result.name) {
-          document.getElementById('userPill').style.display = 'inline-flex';
-          document.getElementById('userAvatar').textContent = result.name[0] || '';
-          document.getElementById('userName').textContent = result.name;
-        }
       } else {
         window.location.href = `${API_BASE_URL}/api/auth/login?t=${Date.now()}`;
       }
