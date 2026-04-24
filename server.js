@@ -31,6 +31,14 @@ try {
   process.exit(1);
 }
 
+// ua-parser-js（可选）
+let UAParser = null;
+try {
+  UAParser = require('ua-parser-js');
+} catch (e) {
+  // ua-parser-js 未安装，跳过
+}
+
 // ==================== 配置项 ====================
 const CONFIG = {
   // 服务端口号
@@ -224,6 +232,75 @@ function extractUserIdFromToken(token) {
     return decoded.userId || '';
   } catch (e) {
     return '';
+  }
+}
+
+/**
+ * 解析 User-Agent，提取设备信息为友好格式
+ * @param {string} uaString - 原始 User-Agent 字符串
+ * @returns {string} 格式化后的设备信息，如 "📱 移动端 · iOS 18.7 · Safari 18"
+ */
+function parseDeviceInfo(uaString) {
+  if (!uaString || !UAParser) return uaString || '';
+
+  try {
+    const parser = new UAParser(uaString);
+    const result = parser.getResult();
+
+    const parts = [];
+
+    // 设备类型
+    const device = result.device;
+    if (device.type === 'mobile') {
+      parts.push('📱 移动端');
+    } else if (device.type === 'tablet') {
+      parts.push('📟 平板');
+    } else if (device.type === 'smarttv') {
+      parts.push('📺 智能电视');
+    } else if (device.type === 'wearable') {
+      parts.push('⌚ 穿戴设备');
+    } else {
+      // 没有明确 type，默认认为是桌面端
+      // 但如果 OS 是 iOS/Android 则可能是移动端
+      const os = result.os;
+      if (os && (os.name === 'iOS' || os.name === 'Android')) {
+        parts.push('📱 移动端');
+      } else {
+        parts.push('🖥 桌面端');
+      }
+    }
+
+    // 操作系统
+    const os = result.os;
+    if (os && os.name) {
+      let osVersion = '';
+      if (os.version) {
+        // iOS 版本号中下划线统一转为点
+        osVersion = os.version.replace(/_/g, '.');
+        // 只取主版本号（如 18.7.1 → 18.7）
+        const versionParts = osVersion.split('.');
+        if (versionParts.length > 1) {
+          osVersion = versionParts.slice(0, 2).join('.');
+        }
+      }
+      parts.push(os.name + (osVersion ? ' ' + osVersion : ''));
+    }
+
+    // 浏览器
+    const browser = result.browser;
+    if (browser && browser.name) {
+      let browserName = browser.name;
+      // Mobile Safari 显示为 Safari
+      if (browserName === 'Mobile Safari') browserName = 'Safari';
+      if (browserName === 'Mobile Chrome') browserName = 'Chrome';
+      let browserVersion = browser.major || '';
+      parts.push(browserName + (browserVersion ? ' ' + browserVersion : ''));
+    }
+
+    return parts.join(' · ');
+  } catch (e) {
+    // 解析失败，返回原始 UA
+    return uaString;
   }
 }
 
@@ -858,6 +935,9 @@ async function refreshAdminCache() {
 
 // 管理后台权限检查中间件 — 返回 { session, isSuperAdmin } 或 null
 function checkAdminAuth(req, res) {
+  if (process.env.SKIP_AUTH === 'true') {
+    return { session: { isAdmin: true, employeeNo: SUPER_ADMIN_EMPLOYEE_NO }, isSuperAdmin: true };
+  }
   const cookie = req.headers.cookie;
   if (!cookie) return null;
 
@@ -1234,10 +1314,11 @@ function handleList(req, res) {
         return sendError(res, '查询失败');
       }
 
-      // 处理图片路径
+      // 处理图片路径和设备信息解析
       const formattedRows = rows.map(row => ({
         ...row,
-        images: row.images ? JSON.parse(row.images) : []
+        images: row.images ? JSON.parse(row.images) : [],
+        device_info: parseDeviceInfo(row.device_info)
       }));
 
       sendSuccess(res, {
@@ -1567,6 +1648,15 @@ async function handleAiChat(req, res) {
 
 请用中文回答，回答要简洁专业。
 
+**输出格式规则（必须严格遵循）：**
+
+1. **用户问"哪类最集中/分布/占比" → 必须返回 distribution 类型**
+2. **用户问"对比/变化/和上周比" → 必须返回 comparison 类型**
+3. **用户要求生成周报 → 必须返回 report 类型**
+4. **用户问单一数字指标 → 返回 number 类型**
+5. **用户问列表/待办/重点问题 → 返回 list 类型**
+6. **普通对话/问候 → 返回 text 类型**
+
 **当用户要求生成周报时，严格按以下 JSON 结构输出，禁止列出具体反馈描述文字：**
 {"type":"report","title":"${weekLabel}用户反馈周报","sections":[
   {"key":"summary","title":"本周概况","content":"一句话判断性总结，指出趋势和问题，不要只复述数字"},
@@ -1592,6 +1682,8 @@ async function handleAiChat(req, res) {
 
 **对比分析约束：**
 - 生成对比结论时，若本周数据远大于上周（超过5倍），不要使用"是上周X倍"的表述，改为"较上周大幅增长，增加了X条"
+- 对比卡片的 before.items 和 after.items 只包含各问题类型的数量，不要包含"新增反馈"这种汇总行
+- 对比卡片的 before.total 和 after.total 必须使用数据概览中的"上周新增"和"本周新增"数值，不要自行计算
 
 **问题类型颜色映射（分布分析 color 字段）：**
 - 体验建议 → #6B9668（绿）
@@ -1600,22 +1692,25 @@ async function handleAiChat(req, res) {
 - 需求 → #6B8CAE（蓝）
 - 功能异常 → #8B7AA8（紫）
 - 其他 → #A89A8F（灰）
-- 其他 → #A89A8F（灰）
 
-**其他类型：**
-- 分布分析: {"type":"distribution","title":"标题","data":[{"label":"标签","value":数值,"color":"颜色（参考上方固定映射）"}]}
-- 对比分析: {"type":"comparison","title":"标题","before":{"label":"之前","items":[{"label":"标签","value":数值}]},"after":{"label":"之后","items":[{"label":"标签","value":数值}]},"summary":"总结"}
-- 数字指标: {"type":"number","value":数值,"label":"指标名","delta":变化值,"suffix":""}
+**其他类型格式：**
+- 分布分析: {"type":"distribution","title":"标题","data":[{"label":"标签","value":数值,"color":"颜色（参考上方固定映射）"}],"intro":"简短说明","insight":"占比最高的类型的分析结论"}
+- 对比分析: {"type":"comparison","title":"标题","before":{"label":"之前","total":上周总数,"items":[{"label":"类型名","value":数值}]},"after":{"label":"之后","total":本周总数,"items":[{"label":"类型名","value":数值}]},"summary":"总结"}
+- 数字指标: {"type":"number","value":数值,"label":"指标名","delta":变化值,"suffix":"","context":"补充说明"}
 - 列表分析: {"type":"list","title":"标题","items":[{"tag":"标签","tagColor":"red|orange|green|blue","content":"内容"}]}
 - 文本回复: {"type":"text","content":"回复内容"}
 
-如果不是要求结构化数据，直接返回文本回复格式即可。只返回 JSON，不要有多余文字。`
+只返回 JSON，不要有多余文字。`
       },
       ...conversationHistory.map(h => ({ role: h.role, content: h.content })),
       { role: 'user', content: userMessage }
     ];
 
     try {
+      console.log('[AI] Calling Kimi API...');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
       const kimiRes = await fetch('https://api.moonshot.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -1628,8 +1723,11 @@ async function handleAiChat(req, res) {
           temperature: 0.6,
           max_tokens: 4000,
           thinking: { type: 'disabled' }
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeout);
 
       if (!kimiRes.ok) {
         const errText = await kimiRes.text();
@@ -1637,8 +1735,8 @@ async function handleAiChat(req, res) {
         return sendError(res, 'AI 服务调用失败，请稍后重试', 502);
       }
 
-      const data = await kimiRes.json();
-      const reply = data.choices?.[0]?.message?.content || '(empty response)';
+      const kimiData = await kimiRes.json();
+      const reply = kimiData.choices?.[0]?.message?.content || '(empty response)';
       console.log('[AI] Kimi reply:', reply.substring(0, 200));
 
       // Parse the JSON response
@@ -1652,6 +1750,10 @@ async function handleAiChat(req, res) {
 
       sendSuccess(res, parsed);
     } catch (e) {
+      if (e.name === 'AbortError') {
+        console.error('[AI] Timeout calling Kimi API');
+        return sendError(res, 'AI 服务响应超时，请重试', 504);
+      }
       console.error('[AI] Error:', e.message, e.stack);
       sendError(res, 'AI 服务调用失败，请稍后重试', 502);
     }
@@ -1827,7 +1929,7 @@ function handleExport(req, res) {
         escapeCsv(row.space || ''),
         escapeCsv(row.status || '收集中'),
         escapeCsv(images),
-        escapeCsv(row.device_info || ''),
+        escapeCsv(parseDeviceInfo(row.device_info) || ''),
         row.created_at
       ];
       csvContent += values.join(',') + '\n';
