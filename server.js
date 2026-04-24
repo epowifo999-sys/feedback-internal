@@ -31,6 +31,14 @@ try {
   process.exit(1);
 }
 
+// exceljs（导出用）
+let ExcelJS = null;
+try {
+  ExcelJS = require('exceljs');
+} catch (e) {
+  // exceljs 未安装，跳过
+}
+
 // ua-parser-js（可选）
 let UAParser = null;
 try {
@@ -1907,62 +1915,143 @@ function handleExport(req, res) {
   // 查询所有数据（不分页）
   const sql = `SELECT * FROM feedback ${whereClause} ORDER BY created_at DESC`;
 
-  db.all(sql, queryParams, (err, rows) => {
+  db.all(sql, queryParams, async (err, rows) => {
     if (err) {
       console.error(`[${formatDate()}] 导出查询失败:`, err);
       return sendError(res, '导出失败');
     }
 
-    // 生成 CSV 内容
-    const headers = ['ID', '问题类型', '问题描述', '联系方式', '提交人', '所属部门', '所属空间', '当前状态', '图片链接', '设备信息', '提交时间'];
-    let csvContent = headers.join(',') + '\n';
+    try {
+      // 批量查询所有反馈的评论
+      let commentsMap = {};
+      if (rows.length > 0) {
+        const feedbackIds = rows.map(r => r.id);
+        const placeholders = feedbackIds.map(() => '?').join(',');
+        const commentSql = `SELECT feedback_id, user_name, created_at, content, type FROM feedback_comments WHERE feedback_id IN (${placeholders}) ORDER BY created_at ASC`;
+        const comments = await new Promise((resolve, reject) => {
+          db.all(commentSql, feedbackIds, (e, result) => {
+            if (e) reject(e);
+            else resolve(result || []);
+          });
+        });
 
-    rows.forEach(row => {
-      const images = row.images ? JSON.parse(row.images).map(img => `${req.headers.host}/data/uploads/${img}`).join('; ') : '';
-      const values = [
-        row.id,
-        escapeCsv(row.issue_type),
-        escapeCsv(row.description),
-        escapeCsv(row.contact || ''),
-        escapeCsv(row.user_name || ''),
-        escapeCsv(row.department || ''),
-        escapeCsv(row.space || ''),
-        escapeCsv(row.status || '收集中'),
-        escapeCsv(images),
-        escapeCsv(parseDeviceInfo(row.device_info) || ''),
-        row.created_at
+        // 按 feedback_id 分组
+        comments.forEach(c => {
+          if (!commentsMap[c.feedback_id]) commentsMap[c.feedback_id] = [];
+          commentsMap[c.feedback_id].push(c);
+        });
+      }
+
+      // 创建 Excel workbook
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('反馈数据');
+
+      // 表头定义
+      const columns = [
+        { header: 'ID', key: 'id', width: 8 },
+        { header: '问题类型', key: 'issue_type', width: 15 },
+        { header: '问题描述', key: 'description', width: 40 },
+        { header: '提交人', key: 'user_name', width: 15 },
+        { header: '岗位', key: 'position', width: 20 },
+        { header: '所属部门', key: 'department', width: 20 },
+        { header: '所属空间', key: 'space', width: 15 },
+        { header: '当前状态', key: 'status', width: 12 },
+        { header: '处理记录', key: 'comments', width: 50 },
+        { header: '图片', key: 'images', width: 20 },
+        { header: '设备信息', key: 'device_info', width: 35 },
+        { header: '提交时间', key: 'created_at', width: 20 }
       ];
-      csvContent += values.join(',') + '\n';
-    });
+      worksheet.columns = columns;
 
-    // 添加 BOM 以支持中文
-    const bom = '\uFEFF';
-    const buffer = Buffer.from(bom + csvContent, 'utf-8');
+      // 设置表头样式
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
 
-    // 生成文件名
-    const timestamp = formatDate().replace(/[:\s]/g, '_');
-    const filename = `feedback_export_${timestamp}.csv`;
+      const baseUrl = process.env.BASE_URL || `http://${req.headers.host}`;
 
-    res.writeHead(200, {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Length': buffer.length
-    });
-    res.end(buffer);
+      // 填充数据行
+      rows.forEach(row => {
+        // 处理记录：格式化为 "操作人 时间：内容"，多条用换行分隔
+        const comments = commentsMap[row.id] || [];
+        const commentsText = comments
+          .map(c => `${c.user_name} ${c.created_at}：${c.content}`)
+          .join('\n');
 
-    console.log(`[${formatDate()}] 导出成功: ${filename}, 共 ${rows.length} 条记录`);
+        // 图片列：超链接或留空
+        let imagesValue = '';
+        let imagesHyperlink = false;
+        if (row.images) {
+          try {
+            const imageList = JSON.parse(row.images);
+            if (Array.isArray(imageList) && imageList.length > 0) {
+              const links = imageList.map(img => `${baseUrl}/data/uploads/${img}`);
+              imagesValue = links.join('\n');
+              imagesHyperlink = true;
+            }
+          } catch (e) {
+            // images 不是有效 JSON，留空
+          }
+        }
+
+        const deviceInfo = parseDeviceInfo(row.device_info) || '';
+
+        worksheet.addRow({
+          id: row.id,
+          issue_type: row.issue_type || '',
+          description: row.description || '',
+          user_name: row.user_name || '',
+          position: row.position || '',
+          department: row.department || '',
+          space: row.space || '',
+          status: row.status || '收集中',
+          comments: commentsText,
+          images: imagesHyperlink ? { hyperlink: imagesValue, text: '点击查看图片' } : '',
+          device_info: deviceInfo,
+          created_at: row.created_at || ''
+        });
+
+        // 如果图片列是超链接，设置样式
+        if (imagesHyperlink) {
+          const lastRow = worksheet.lastRow;
+          const imagesCell = lastRow.getCell('images');
+          imagesCell.font = { color: { argb: 'FF0563C1' }, underline: true };
+        }
+
+        // 如果有处理记录，允许单元格内换行
+        if (commentsText) {
+          const lastRow = worksheet.lastRow;
+          const commentsCell = lastRow.getCell('comments');
+          commentsCell.alignment = { wrapText: true };
+        }
+
+        // 设备信息允许换行
+        if (deviceInfo && deviceInfo.length > 30) {
+          const lastRow = worksheet.lastRow;
+          const deviceCell = lastRow.getCell('device_info');
+          deviceCell.alignment = { wrapText: true };
+        }
+      });
+
+      // 生成 buffer
+      const buffer = await workbook.xlsx.writeBuffer();
+
+      // 生成文件名
+      const dateStr = formatDate().split(' ')[0];
+      const filename = `反馈数据_${dateStr}.xlsx`;
+
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+        'Content-Length': buffer.length
+      });
+      res.end(buffer);
+
+      console.log(`[${formatDate()}] 导出成功: ${filename}, 共 ${rows.length} 条记录`);
+    } catch (e) {
+      console.error(`[${formatDate()}] 导出失败:`, e);
+      sendError(res, '导出失败: ' + e.message);
+    }
   });
-}
-
-// CSV 字段转义
-function escapeCsv(value) {
-  if (value == null) return '';
-  const str = String(value);
-  // 如果包含逗号、引号或换行符，需要用引号包裹并转义
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
 }
 
 // ==================== 状态更新接口 ====================
