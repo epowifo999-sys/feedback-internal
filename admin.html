@@ -137,6 +137,7 @@ body { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
   position: relative;
   overflow: visible;
   clip-path: none;
+  transition: width 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .sidebar.collapsed { width: 60px; }
 
@@ -492,14 +493,28 @@ table.tbl {
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
+.tbl thead th:first-child {
+  width: 40px;
+  padding: 10px 8px;
+  text-align: center;
+}
 .tbl tbody td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--divider);
   vertical-align: middle;
 }
+.tbl tbody td:first-child {
+  padding: 12px 8px;
+  text-align: center;
+  box-shadow: inset 3px 0 0 transparent;
+  transition: box-shadow 150ms ease;
+}
 .tbl tbody tr {
   cursor: pointer;
   transition: background var(--dur) var(--ease);
+}
+.tbl tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 #E8643C;
 }
 .tbl tbody tr:hover { background: var(--bg-soft); }
 .tbl tbody tr.selected { background: var(--brand-soft); }
@@ -2737,7 +2752,7 @@ table.tbl {
             <table class="tbl">
               <thead>
                 <tr>
-                  <th style="width:36px;"><span class="ck" id="ckAll"></span></th>
+                  <th style="width:40px;"><span class="ck" id="ckAll"></span></th>
                   <th style="width:90px;">类型</th>
                   <th style="width:200px;">描述</th>
                   <th style="width:90px;">空间</th>
@@ -2974,6 +2989,22 @@ table.tbl {
   }
 
   // 加载统计
+  // 数字滚动动画 — easeOutQuart 缓动
+  function animateNumber(el, target, duration = 800) {
+    const num = parseInt(target, 10);
+    if (isNaN(num) || num === 0) { el.textContent = target; return; }
+    const start = performance.now();
+    const easeOutQuart = t => 1 - Math.pow(1 - t, 4);
+    function tick(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const current = Math.round(easeOutQuart(progress) * num);
+      el.textContent = current.toLocaleString();
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
   async function loadStats() {
     try {
       const [overviewRes, trendRes] = await Promise.all([
@@ -2985,20 +3016,20 @@ table.tbl {
       const trendData = trendRes.ok ? await trendRes.json() : { trend: [] };
 
       if (overview.success) {
-        // 总反馈 — 显示差值
-        document.getElementById('kpiTotal').textContent = overview.total.value;
+        // 总反馈 — 数字滚动动画
+        animateNumber(document.getElementById('kpiTotal'), overview.total.value);
         setDeltaAbs('kpiDeltaTotal', overview.total.delta);
 
-        // 本周新增 — 显示差值
-        document.getElementById('kpiNew').textContent = overview.new_count.value;
+        // 本周新增 — 数字滚动动画
+        animateNumber(document.getElementById('kpiNew'), overview.new_count.value);
         setDeltaAbs('kpiDeltaNew', overview.new_count.delta);
 
-        // 待处理 — 显示差值
-        document.getElementById('kpiPending').textContent = overview.pending.value;
+        // 待处理 — 数字滚动动画
+        animateNumber(document.getElementById('kpiPending'), overview.pending.value);
         setDeltaAbs('kpiDeltaPending', overview.pending.delta);
 
-        // 已解决 — 显示差值
-        document.getElementById('kpiResolved').textContent = overview.resolved.value;
+        // 已解决 — 数字滚动动画
+        animateNumber(document.getElementById('kpiResolved'), overview.resolved.value);
         setDeltaAbs('kpiDeltaResolved', overview.resolved.delta);
       }
 
