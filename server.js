@@ -75,7 +75,7 @@ const CONFIG = {
   TOCA_REFRESH_USER_TOKEN_URL: 'http://toca.17u.cn/open-api/auth/v2/user-token/refresh',
 
   // ===== toca IM 通知配置 =====
-  TOCA_NOTIFY_USER_ID: process.env.TOCA_NOTIFY_USER_ID || '1223489',   // 接收通知的用户ID（工号或memberUniqueId）
+  TOCA_NOTIFY_USER_IDS: (process.env.TOCA_NOTIFY_USER_IDS || '1223489').split(',').map(s => s.trim()).filter(Boolean),   // 接收通知的用户ID列表（工号或memberUniqueId，逗号分隔）
   TOCA_NOTIFY_USER_TYPE: parseInt(process.env.TOCA_NOTIFY_USER_TYPE || '2', 10), // 2=工号 4=memberUniqueId
 
   // ===== 管理后台地址 =====
@@ -468,7 +468,7 @@ setInterval(async () => {
 
 // 发送 toca IM 通知
 async function sendTocaNotification({ issue_type, description, memberName, outerMemberId, employeeNo, space, reqHost }) {
-  if (!CONFIG.TOCA_NOTIFY_USER_ID) return;
+  if (!CONFIG.TOCA_NOTIFY_USER_IDS.length) return;
 
   try {
     const spaceToken = await getTocaSpaceToken();
@@ -543,28 +543,30 @@ async function sendTocaNotification({ issue_type, description, memberName, outer
       }
     });
 
-    const resp = await request({
-      method: 'POST',
-      hostname: 'toca.17u.cn',
-      path: '/open-api/msg/v1/msg/bot/send',
-      headers: {
-        'Authorization': spaceToken,
-        'Content-Type': 'application/json'
-      }
-    }, {
-      requestId: Date.now(),
-      to: CONFIG.TOCA_NOTIFY_USER_ID,
-      msgType: 1,
-      version: '1.0.0',
-      content: cardContent,
-      pushContent: '贴心 Claw 收到一条新用户反馈',
-      userType: CONFIG.TOCA_NOTIFY_USER_TYPE
-    });
+    for (const userId of CONFIG.TOCA_NOTIFY_USER_IDS) {
+      const resp = await request({
+        method: 'POST',
+        hostname: 'toca.17u.cn',
+        path: '/open-api/msg/v1/msg/bot/send',
+        headers: {
+          'Authorization': spaceToken,
+          'Content-Type': 'application/json'
+        }
+      }, {
+        requestId: Date.now(),
+        to: userId,
+        msgType: 1,
+        version: '1.0.0',
+        content: cardContent,
+        pushContent: '贴心 Claw 收到一条新用户反馈',
+        userType: CONFIG.TOCA_NOTIFY_USER_TYPE
+      });
 
-    if (resp.data && resp.data.success) {
-      console.log(`[${formatDate()}] toca IM 通知推送成功`);
-    } else {
-      console.error(`[${formatDate()}] toca IM 通知推送失败: code=${resp.data?.code}, message=${resp.data?.message}`);
+      if (resp.data && resp.data.success) {
+        console.log(`[${formatDate()}] toca IM 通知推送成功 → ${userId}`);
+      } else {
+        console.error(`[${formatDate()}] toca IM 通知推送失败 → ${userId}: code=${resp.data?.code}, message=${resp.data?.message}`);
+      }
     }
   } catch (e) {
     console.error(`[${formatDate()}] toca IM 通知推送异常:`, e.message);
