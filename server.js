@@ -616,8 +616,9 @@ async function fetchMemberInfo(sessionId) {
       }
     }
 
-    // 2. 用 spaceToken 调 member/list-by-employee-nos 获取岗位信息
+    // 2. 用 spaceToken 调 member/list-by-employee-nos 获取岗位和部门信息
     let position = '';
+    let department = '';
     try {
       const spaceToken = await getTocaSpaceToken();
       const memberResp = await request({
@@ -631,10 +632,11 @@ async function fetchMemberInfo(sessionId) {
       }, {
         spaceId: CONFIG.TOCA_SPACE_ID,
         employeeNos: [session.employeeNo],
+        includeMemberDeptData: true,
         includeCustomData: true
       });
 
-      console.log(`[${formatDate()}] 岗位查询返回: ${JSON.stringify(memberResp.data)}`);
+      console.log(`[${formatDate()}] 成员信息查询返回: ${JSON.stringify(memberResp.data)}`);
 
       if (memberResp.data && memberResp.data.success && memberResp.data.data?.length > 0) {
         const member = memberResp.data.data[0];
@@ -644,15 +646,15 @@ async function fetchMemberInfo(sessionId) {
           const postField = member.customFields.find(f => f.name === 'post_level_name');
           if (postField) position = postField.value;
         }
+
+        // 部门：从 departments 组装完整路径（distance 0 是末级，数字越大越靠近根）
+        if (member.departments?.length > 0) {
+          const sorted = [...member.departments].sort((a, b) => b.distance - a.distance);
+          department = sorted.map(d => d.departmentName).join('/');
+        }
       }
     } catch (e) {
-      console.error(`[${formatDate()}] 岗位信息查询失败:`, e.message);
-    }
-
-    // 3. 部门：用 uic/user 返回的 departmentName（TOCA 中配置的末级部门名）
-    let department = '';
-    if (resp.data?.data?.departmentName) {
-      department = resp.data.data.departmentName;
+      console.error(`[${formatDate()}] 成员信息查询失败:`, e.message);
     }
 
     if (department) session.department = department;
@@ -2250,6 +2252,33 @@ const server = http.createServer(async (req, res) => {
     // 健康检查
     if (pathname === '/api/health') {
       return sendSuccess(res, { status: 'ok', time: formatDate() });
+    }
+
+    // 用户反馈页面鉴权：访问 / 或 /index 时检查登录，未登录则重定向到 toca 登录页
+    if ((pathname === '/' || pathname === '/index') && process.env.SKIP_AUTH !== 'true') {
+      const cookieHeader = req.headers.cookie;
+      let hasValidSession = false;
+      if (cookieHeader) {
+        const cookies = cookieHeader.split(';').reduce((acc, c) => {
+          const [key, value] = c.trim().split('=');
+          acc[key] = value;
+          return acc;
+        }, {});
+        if (cookies.sessionId && userSessions.has(cookies.sessionId)) {
+          hasValidSession = true;
+        }
+      }
+      if (!hasValidSession) {
+        console.log(`[${formatDate()}] 未登录，重定向到 toca 授权页面`);
+        const reqHost = req.headers.host || `localhost:${CONFIG.PORT}`;
+        const redirectUri = encodeURIComponent(`http://${reqHost}/api/auth/callback`);
+        const state = generateUUID();
+        oauthStates.set(state, { createdAt: Date.now() });
+        const authUrl = `${CONFIG.TOCA_OAUTH_AUTHORIZE_URL}?agentId=${CONFIG.TOCA_AGENT_ID}&redirectUri=${redirectUri}&state=${state}`;
+        res.writeHead(302, { 'Location': authUrl });
+        res.end();
+        return;
+      }
     }
 
     // 静态文件服务

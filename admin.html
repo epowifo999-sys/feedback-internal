@@ -94,26 +94,91 @@ button { font-family: inherit; }
 ::-webkit-scrollbar-thumb:hover { background: oklch(0.78 0.012 75); }
 ::-webkit-scrollbar-track { background: transparent; }
 
-body { min-height: 100vh; display: flex; flex-direction: column; }
+/* ===== App-Shell 骨架布局 ===== */
+/* Step 1: Root — 固定视口，不产生滚动 */
+html { height: 100%; }
+body { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
-/* ---------- 整体布局 ---------- */
-.app-layout {
-  display: flex; flex: 1; min-height: 0;
+/* Step 1.5: mainContent 容器 — 连接 body 与内部布局的高度约束 */
+#mainContent {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-/* ---------- 侧边导航 ---------- */
+/* Step 2: Header (topbar) — 固定高度，不收缩 */
+.topbar {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 28px;
+  display: flex; align-items: center; gap: 18px;
+}
+
+/* Step 3: 主包裹 (sidebar + content) — 占满剩余，不溢出 */
+.app-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Step 4a: 侧边栏 — 不收缩，内部 flex 列 */
 .sidebar {
   width: 220px;
-  min-height: calc(100vh - 53px);
   background: var(--surface);
   border-right: 1px solid var(--border);
-  display: flex; flex-direction: column;
-  transition: width 200ms ease;
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
   position: relative;
-  z-index: 10;
+  overflow: visible;
+  clip-path: none;
 }
-.sidebar.collapsed { width: 52px; }
+.sidebar.collapsed { width: 60px; }
+
+/* 菜单区 — 不占满，不需要滚动 */
+.sidebar-nav {
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* 底部 — 固定在最底部，不收缩 */
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--divider);
+  padding: 12px 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Step 5: 内容区 — 占满剩余，内部 flex 列，不溢出 */
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nav-group-label {
+  font-size: 11px; font-weight: 500; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 12px 10px 6px 10px;
+  flex-shrink: 0;
+  transition: opacity 200ms ease, height 200ms ease, padding 200ms ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.sidebar.collapsed .nav-group-label { opacity: 0; height: 0; padding: 0 10px; }
 
 /* 常驻折叠按钮 */
 .sidebar-toggle-float {
@@ -138,11 +203,10 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .sidebar.collapsed .toggle-float-btn svg { transform: rotate(180deg); }
 .sidebar.collapsed .toggle-float-btn:hover svg { transform: rotate(180deg) scale(1.1); }
 
-.sidebar-nav { padding: 10px 8px; display: flex; flex-direction: column; gap: 3px; }
-
+/* 导航菜单项 */
 .nav-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-radius: var(--r-md);
   cursor: pointer;
   font-size: 13.5px; color: var(--ink-2);
@@ -155,21 +219,74 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .nav-item.active { background: var(--brand-soft); color: #E8643C; font-weight: 500; }
 .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
 .nav-item .nav-label { transition: opacity 200ms ease, width 200ms ease; opacity: 1; }
-.sidebar.collapsed .nav-item { justify-content: center; padding: 7px 0; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: 8px 0; }
 .sidebar.collapsed .nav-item:not(.active) { color: var(--ink-4); }
 .sidebar.collapsed .nav-item .nav-label { opacity: 0; width: 0; overflow: hidden; }
 
-/* ---------- 主内容区 ---------- */
-.main-area { flex: 1; min-width: 0; overflow-x: auto; }
-
-/* ---------- 顶部 ---------- */
-.topbar {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 28px;
-  display: flex; align-items: center; gap: 18px;
-  position: sticky; top: 0; z-index: 20;
+/* 侧边栏底部卡片 */
+.sidebar-footer-card {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 10px;
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+  transition: opacity 200ms ease;
 }
+.sidebar-footer-card .footer-icon {
+  width: 16px; height: 16px; flex-shrink: 0;
+  color: var(--ink-3);
+}
+.sidebar-footer-card .footer-text {
+  flex: 1; min-width: 0;
+  transition: opacity 200ms ease, width 200ms ease;
+}
+.sidebar-footer-card .footer-title {
+  font-size: 12.5px; font-weight: 500; color: var(--ink-2);
+  white-space: nowrap;
+}
+.sidebar-footer-card .footer-desc {
+  font-size: 11px; color: var(--ink-4); margin-top: 2px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.sidebar.collapsed .sidebar-footer { padding: 10px 8px; }
+.sidebar.collapsed .sidebar-footer-card {
+  justify-content: center; padding: 8px 0;
+  background: transparent;
+}
+.sidebar.collapsed .sidebar-footer-card .footer-text {
+  opacity: 0; width: 0; overflow: hidden;
+}
+.sidebar.collapsed .sidebar-footer-card .footer-icon {
+  color: var(--ink-4);
+}
+
+/* 内容可滚动区 — 仅表格区滚动 */
+.content-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 28px 28px;
+}
+
+/* KPI 固定不收缩 */
+.kpi-strip { flex-shrink: 0; }
+
+/* 面板 — 填满 content-scroll，内部 flex 列 */
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+/* 工具栏固定 */
+.ptool { flex-shrink: 0; }
+
+/* Topbar 样式已在 App-Shell 骨架中定义 */
+
 .brand {
   display: flex; align-items: center; gap: 10px;
 }
@@ -268,6 +385,7 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .kpi-strip {
   padding: 22px 28px 0;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  flex-shrink: 0;
 }
 .kpi-card {
   background: var(--surface);
@@ -293,15 +411,6 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
   width: 56px; height: 20px; opacity: 0.45;
 }
 .kpi-card .spark-wrap canvas { width: 100%; height: 100%; }
-
-/* ---------- 主面板 ---------- */
-.panel {
-  margin: 18px 28px 28px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  overflow: hidden;
-}
 
 /* 工具栏 */
 .ptool {
@@ -431,9 +540,10 @@ table.tbl {
 
 .space-tag {
   padding: 2px 7px; border-radius: 4px;
-  background: var(--info-soft); color: oklch(0.42 0.11 240);
   font-size: 11.5px; font-weight: 500; white-space: nowrap;
 }
+.space-tag.lz { background: #4A9EE0; color: #fff; }
+.space-tag.mw { background: #E8643C; color: #fff; }
 
 .desc-cell {
   color: var(--ink);
@@ -457,6 +567,7 @@ table.tbl {
   overflow: hidden; text-overflow: ellipsis;
 }
 .user-cell .av {
+  flex-shrink: 0; min-width: 22px;
   width: 22px; height: 22px; border-radius: 50%;
   background: linear-gradient(135deg, oklch(0.75 0.08 180), oklch(0.55 0.12 220));
   color: #fff;
@@ -466,6 +577,29 @@ table.tbl {
 .user-cell .u-contact { font-size: 11px; color: var(--ink-4); margin-top: 1px; }
 
 .time-cell { color: var(--ink-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* 自定义 tooltip — 列表部门 */
+.dept-cell {
+  cursor: pointer;
+}
+
+/* 自定义 tooltip — 抽屉部门 */
+.info-item .dept-tooltip { cursor: pointer; }
+
+/* 全局 tooltip */
+.global-tooltip {
+  position: absolute; z-index: 9999;
+  top: 100%; left: 0;
+  background: #1A1A1A; color: #fff;
+  padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; line-height: 1.5;
+  max-width: 300px; word-wrap: break-word;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  visibility: hidden;
+}
+.global-tooltip.show { opacity: 1; visibility: visible; }
 
 /* 状态下拉 */
 .status-sel {
@@ -528,6 +662,7 @@ table.tbl {
   border-top: 1px solid var(--divider);
   font-size: 12.5px;
   color: var(--ink-3);
+  flex-shrink: 0;
 }
 .pager {
   display: flex; align-items: center; gap: 2px;
@@ -2462,7 +2597,7 @@ table.tbl {
 <!-- 主内容 -->
 <div id="mainContent" style="display:none;">
 
-  <!-- 顶部 -->
+  <!-- 顶部（固定，不收缩） -->
   <div class="topbar">
     <div class="brand">
       <div class="logo">🦞</div>
@@ -2473,21 +2608,21 @@ table.tbl {
     </div>
     <div class="spacer"></div>
     <button class="settings-btn" id="settingsBtn" onclick="openAdminSettings()" title="管理员配置">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
     <button class="logout-btn" onclick="logout()">退出登录</button>
   </div>
 
-  <!-- KPI -->
+  <!-- 主体布局（sidebar + content） -->
   <div class="app-layout">
-    <!-- 左侧导航 -->
+    <!-- 左侧导航（固定宽度，内部 flex 列） -->
     <div class="sidebar" id="sidebar">
-      <!-- 常驻折叠按钮 -->
       <div class="sidebar-toggle-float" id="sidebarToggleFloat">
         <button class="toggle-float-btn" onclick="toggleSidebar()" id="toggleFloatBtn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
         </button>
       </div>
+      <div class="nav-group-label">菜单</div>
       <nav class="sidebar-nav">
         <button class="nav-item active" onclick="navFeedback()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -2498,119 +2633,131 @@ table.tbl {
           <span class="nav-label">虾点子配置</span>
         </button>
       </nav>
-    </div>
-
-    <!-- 主内容区 -->
-    <div class="main-area">
-  <!-- KPI -->
-  <div class="kpi-strip" id="kpiStrip">
-    <div class="kpi-card" data-kpi="total">
-      <span class="lbl">总反馈</span>
-      <div class="row"><span class="val" id="kpiTotal">-</span><span class="delta" id="kpiDeltaTotal"></span></div>
-      <span class="hint" id="kpiHintTotal">对比上周</span>
-      <div class="spark-wrap"><canvas id="sparkTotal"></canvas></div>
-    </div>
-    <div class="kpi-card" data-kpi="new">
-      <span class="lbl">本周新增</span>
-      <div class="row"><span class="val" id="kpiNew">-</span><span class="delta" id="kpiDeltaNew"></span></div>
-      <span class="hint" id="kpiHintNew">日均 - 条</span>
-      <div class="spark-wrap"><canvas id="sparkNew"></canvas></div>
-    </div>
-    <div class="kpi-card" data-kpi="pending">
-      <span class="lbl">待处理</span>
-      <div class="row"><span class="val" id="kpiPending" style="color:var(--danger);">-</span><span class="delta" id="kpiDeltaPending"></span></div>
-      <span class="hint" id="kpiHintPending">对比上周</span>
-      <div class="spark-wrap"><canvas id="sparkPending"></canvas></div>
-    </div>
-    <div class="kpi-card" data-kpi="resolved">
-      <span class="lbl">已解决</span>
-      <div class="row"><span class="val" id="kpiResolved" style="color:oklch(0.42 0.12 155);">-</span><span class="delta" id="kpiDeltaResolved"></span></div>
-      <span class="hint" id="kpiHintResolved">对比上周</span>
-      <div class="spark-wrap"><canvas id="sparkResolved"></canvas></div>
-    </div>
-  </div>
-
-  <!-- 主面板 -->
-  <div class="panel">
-    <div class="ptool">
-      <div class="search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        <input type="text" id="searchInput" placeholder="搜索描述 / 提交人…" />
-      </div>
-      <button class="btn btn-primary" id="searchBtn" style="padding:7px 14px;font-size:13px;height:34px;">搜索</button>
-
-      <div class="seg-filter" id="statusFilter">
-        <button class="active" data-status="all">全部</button>
-        <button data-status="收集中">待处理</button>
-        <button data-status="解决中">解决中</button>
-        <button data-status="已解决">已解决</button>
-      </div>
-
-      <div class="seg-filter" id="typeFilter">
-        <button class="active" data-type="all">全部类型</button>
-        <button data-type="输出不准确">不准确</button>
-        <button data-type="BUG">BUG</button>
-        <button data-type="体验建议">建议</button>
-        <button data-type="需求">需求</button>
-      </div>
-
-      <button class="icon-btn" title="高级筛选" id="advFilterBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-      </button>
-
-      <div class="tool-right">
-        <span class="count-lbl" id="countLbl">-</span>
-        <button class="btn btn-ghost" style="height:32px; padding:0 12px; font-size:12.5px; gap:6px;" title="导出为Excel" onclick="exportToExcel()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-          导出为Excel
-        </button>
-        <button class="ai-analysis-btn" title="AI 数据分析" onclick="toggleAiPanel(true)">
-          <span>✦</span> AI 分析
-        </button>
-      </div>
-    </div>
-
-    <!-- 高级筛选 -->
-    <div id="advFilterPanel" style="display:none; padding:14px 18px; border-bottom:1px solid var(--divider); background:var(--bg-soft);">
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <span style="font-size:12px; color:var(--ink-3); min-width:60px;">所属空间</span>
-        <div class="seg-filter" id="spaceFilter">
-          <button class="active" data-space="all">全部</button>
-          <button data-space="灵珠虾">灵珠虾</button>
-          <button data-space="魔丸虾">魔丸虾</button>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-card">
+          <svg class="footer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <div class="footer-text">
+            <div class="footer-title">更多功能</div>
+            <div class="footer-desc">持续建设中，敬请期待</div>
+          </div>
         </div>
-        <span style="font-size:12px; color:var(--ink-3); min-width:60px; margin-left:12px;">提交时间</span>
-        <input type="date" id="startDate" style="padding:5px 8px; border:1px solid var(--border); border-radius:var(--r-sm); font-size:12px; color:var(--ink); background:var(--surface);" />
-        <span style="color:var(--ink-4); font-size:12px;">至</span>
-        <input type="date" id="endDate" style="padding:5px 8px; border:1px solid var(--border); border-radius:var(--r-sm); font-size:12px; color:var(--ink); background:var(--surface);" />
-        <button class="icon-btn" title="清除日期" onclick="clearDateFilter()" style="width:auto; padding:0 8px; font-size:11px;">清除</button>
       </div>
     </div>
 
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th style="width:36px;"><span class="ck" id="ckAll"></span></th>
-            <th style="width:90px;">类型</th>
-            <th>描述</th>
-            <th style="width:90px;">空间</th>
-            <th style="width:160px;">提交人</th>
-            <th style="width:140px;">所属部门</th>
-            <th style="width:100px;">岗位</th>
-            <th style="width:140px;">时间</th>
-            <th style="width:110px;">状态</th>
-            <th style="width:60px;"></th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
+    <!-- 右侧内容区（占满剩余，内部 flex 列） -->
+    <div class="content-area">
+      <!-- KPI 固定不收缩 -->
+      <div class="kpi-strip" id="kpiStrip">
+        <div class="kpi-card" data-kpi="total">
+          <span class="lbl">总反馈</span>
+          <div class="row"><span class="val" id="kpiTotal">-</span><span class="delta" id="kpiDeltaTotal"></span></div>
+          <span class="hint" id="kpiHintTotal">对比上周</span>
+          <div class="spark-wrap"><canvas id="sparkTotal"></canvas></div>
+        </div>
+        <div class="kpi-card" data-kpi="new">
+          <span class="lbl">本周新增</span>
+          <div class="row"><span class="val" id="kpiNew">-</span><span class="delta" id="kpiDeltaNew"></span></div>
+          <span class="hint" id="kpiHintNew">日均 - 条</span>
+          <div class="spark-wrap"><canvas id="sparkNew"></canvas></div>
+        </div>
+        <div class="kpi-card" data-kpi="pending">
+          <span class="lbl">待处理</span>
+          <div class="row"><span class="val" id="kpiPending" style="color:var(--danger);">-</span><span class="delta" id="kpiDeltaPending"></span></div>
+          <span class="hint" id="kpiHintPending">对比上周</span>
+          <div class="spark-wrap"><canvas id="sparkPending"></canvas></div>
+        </div>
+        <div class="kpi-card" data-kpi="resolved">
+          <span class="lbl">已解决</span>
+          <div class="row"><span class="val" id="kpiResolved" style="color:oklch(0.42 0.12 155);">-</span><span class="delta" id="kpiDeltaResolved"></span></div>
+          <span class="hint" id="kpiHintResolved">对比上周</span>
+          <div class="spark-wrap"><canvas id="sparkResolved"></canvas></div>
+        </div>
+      </div>
 
-    <div class="paginate" id="paginate"></div>
+      <!-- 可滚动区 -->
+      <div class="content-scroll">
+        <!-- 主面板 -->
+        <div class="panel">
+          <div class="ptool">
+            <div class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="text" id="searchInput" placeholder="搜索描述 / 提交人…" />
+            </div>
+            <button class="btn btn-primary" id="searchBtn" style="padding:7px 14px;font-size:13px;height:34px;">搜索</button>
+
+            <div class="seg-filter" id="statusFilter">
+              <button class="active" data-status="all">全部</button>
+              <button data-status="收集中">待处理</button>
+              <button data-status="解决中">解决中</button>
+              <button data-status="已解决">已解决</button>
+            </div>
+
+            <div class="seg-filter" id="typeFilter">
+              <button class="active" data-type="all">全部类型</button>
+              <button data-type="输出不准确">不准确</button>
+              <button data-type="BUG">BUG</button>
+              <button data-type="体验建议">建议</button>
+              <button data-type="需求">需求</button>
+            </div>
+
+            <button class="icon-btn" title="高级筛选" id="advFilterBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            </button>
+
+            <div class="tool-right">
+              <span class="count-lbl" id="countLbl">-</span>
+              <button class="btn btn-ghost" style="height:32px; padding:0 12px; font-size:12.5px; gap:6px;" title="导出为Excel" onclick="exportToExcel()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                导出为Excel
+              </button>
+              <button class="ai-analysis-btn" title="AI 数据分析" onclick="toggleAiPanel(true)">
+                <span>✦</span> AI 分析
+              </button>
+            </div>
+          </div>
+
+          <!-- 高级筛选 -->
+          <div id="advFilterPanel" style="display:none; padding:14px 18px; border-bottom:1px solid var(--divider); background:var(--bg-soft);">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <span style="font-size:12px; color:var(--ink-3); min-width:60px;">所属空间</span>
+              <div class="seg-filter" id="spaceFilter">
+                <button class="active" data-space="all">全部</button>
+                <button data-space="灵珠虾">灵珠虾</button>
+                <button data-space="魔丸虾">魔丸虾</button>
+              </div>
+              <span style="font-size:12px; color:var(--ink-3); min-width:60px; margin-left:12px;">提交时间</span>
+              <input type="date" id="startDate" style="padding:5px 8px; border:1px solid var(--border); border-radius:var(--r-sm); font-size:12px; color:var(--ink); background:var(--surface);" />
+              <span style="color:var(--ink-4); font-size:12px;">至</span>
+              <input type="date" id="endDate" style="padding:5px 8px; border:1px solid var(--border); border-radius:var(--r-sm); font-size:12px; color:var(--ink); background:var(--surface);" />
+              <button class="icon-btn" title="清除日期" onclick="clearDateFilter()" style="width:auto; padding:0 8px; font-size:11px;">清除</button>
+            </div>
+          </div>
+
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width:36px;"><span class="ck" id="ckAll"></span></th>
+                  <th style="width:90px;">类型</th>
+                  <th style="width:200px;">描述</th>
+                  <th style="width:90px;">空间</th>
+                  <th style="width:160px;">提交人</th>
+                  <th style="width:140px;">所属部门</th>
+                  <th style="width:100px;">岗位</th>
+                  <th style="width:140px;">时间</th>
+                  <th style="width:110px;">状态</th>
+                  <th style="width:60px;"></th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="paginate" id="paginate"></div>
+        </div>
+      </div>
+    </div>
   </div>
-  </div><!-- end main-area -->
-  </div><!-- end app-layout -->
 </div>
 
 <!-- Toast提示 -->
@@ -2773,7 +2920,7 @@ table.tbl {
       const res = await fetch(`${API_BASE_URL}/api/feedback/stats`, { credentials: 'include' });
       if (res.ok) {
         document.getElementById('landingPage').classList.add('hidden');
-        document.getElementById('mainContent').style.display = 'block';
+        document.getElementById('mainContent').style.display = 'flex';
         loadStats();
         loadFeedbackList();
         // 检查是否为超级管理员，控制设置按钮显隐
@@ -2980,6 +3127,12 @@ table.tbl {
     return { name: raw, employeeNo: '', display: raw, initial: raw[0] };
   }
 
+  function getSpaceTagClass(space) {
+    if (space === '灵珠虾') return 'lz';
+    if (space === '魔丸虾') return 'mw';
+    return '';
+  }
+
   // 查询单个用户的部门信息（带缓存）
   async function fetchDepartment(searchKey) {
     if (!searchKey || searchKey === '匿名') return null;
@@ -3010,9 +3163,17 @@ table.tbl {
     }
   }
 
-  // 获取部门显示文本（直接使用服务端返回的 department 字段）
+  // 获取部门显示文本：只显示最后一级部门名称
   function getDeptDisplay(item) {
-    return item.department || '—';
+    const dept = item.department;
+    if (!dept) return '—';
+    const parts = dept.split(/[\/／]/);
+    return parts[parts.length - 1] || dept;
+  }
+
+  // 获取完整部门路径（用于 title 悬浮提示）
+  function getDeptFullPath(item) {
+    return item.department || null;
   }
 
   // 批量获取列表中所有用户的部门信息
@@ -3044,8 +3205,8 @@ table.tbl {
       <tr data-id="${item.id}">
         <td><span class="ck row-ck" data-id="${item.id}"></span></td>
         <td><span class="type-tag ${tc}">${escapeHtml(item.issue_type)}</span></td>
-        <td class="desc-cell" title="${escapeHtml(item.description)}">${escapeHtml(item.description)}${item.images && item.images.length ? `<span class="imgs-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>${item.images.length}</span>` : ''}</td>
-        <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : '<span style="color:var(--ink-4);font-size:12px;">-</span>'}</td>
+        <td class="desc-cell" data-desc-full="${escapeHtml(item.description)}"><span class="desc-text">${escapeHtml(item.description)}</span>${item.images && item.images.length ? `<span class="imgs-inline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>${item.images.length}</span>` : ''}</td>
+        <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.space ? `<span class="space-tag ${getSpaceTagClass(item.space)}">${escapeHtml(item.space)}</span>` : '<span style="color:var(--ink-4);font-size:12px;">-</span>'}</td>
         <td>
           <div class="user-cell">
             <span class="av">${escapeHtml(u.initial)}</span>
@@ -3055,7 +3216,7 @@ table.tbl {
             </div>
           </div>
         </td>
-        <td style="font-size:12px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${getDeptDisplay(item)}">${getDeptDisplay(item)}</td>
+        <td class="dept-cell" data-tooltip="${getDeptFullPath(item) || ''}" style="font-size:12px; color:var(--ink-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${getDeptDisplay(item)}</td>
         <td style="font-size:12px; color:var(--ink-3); min-width:80px; white-space:nowrap;">${item.position ? escapeHtml(item.position) : '<span style="color:var(--ink-4);">—</span>'}</td>
         <td class="time-cell">${formatDateTime(item.created_at)}</td>
         <td>
@@ -3113,6 +3274,8 @@ table.tbl {
         };
       });
     });
+    // 绑定 tooltip（描述列+部门列）
+    if (window.bindTooltips) window.bindTooltips();
   }
 
   // 修改状态
@@ -3441,7 +3604,7 @@ table.tbl {
       <!-- Meta bar -->
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <span class="type-tag ${tc}">${escapeHtml(item.issue_type)}</span>
-        ${item.space ? `<span class="space-tag">${escapeHtml(item.space)}</span>` : ''}
+        ${item.space ? `<span class="space-tag ${getSpaceTagClass(item.space)}">${escapeHtml(item.space)}</span>` : ''}
         <span style="font-size:12px; color:var(--ink-4); margin-left:auto; font-family:var(--font-mono);">${formatDateTime(item.created_at)}</span>
       </div>
       <!-- Description -->
@@ -3472,7 +3635,7 @@ table.tbl {
           </div>
           <div class="info-item">
             <span class="label">所属部门</span>
-            <span class="value">${escapeHtml(dept)}</span>
+            <span class="value dept-tooltip" data-tooltip="${getDeptFullPath(item) || ''}">${escapeHtml(dept)}</span>
           </div>
           <div class="info-item">
             <span class="label">岗位</span>
@@ -4332,6 +4495,102 @@ table.tbl {
       setTimeout(() => { btn.innerHTML = orig; }, 1500);
     } catch (e) {}
   }
+
+  // tooltip 系统：描述列（仅截断时）+ 部门列（始终可用）
+  (function() {
+    let tipEl = null;
+    let timer = null;
+    let currentTarget = null;
+
+    function getOrCreateTip() {
+      if (!tipEl) {
+        tipEl = document.createElement('div');
+        tipEl.className = 'global-tooltip';
+        document.body.appendChild(tipEl);
+      }
+      return tipEl;
+    }
+
+    function showTip(target, text) {
+      hideTip();
+      timer = setTimeout(function() {
+        const tip = getOrCreateTip();
+        const rect = target.getBoundingClientRect();
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        tip.textContent = text;
+        tip.style.left = rect.left + scrollX + 'px';
+        tip.style.top = rect.bottom + scrollY + 4 + 'px';
+        tip.classList.add('show');
+        currentTarget = target;
+      }, 500);
+    }
+
+    function hideTip() {
+      clearTimeout(timer);
+      timer = null;
+      if (tipEl) {
+        tipEl.classList.remove('show');
+      }
+      currentTarget = null;
+    }
+
+    // 描述列：仅截断时绑定 tooltip
+    function bindDescCells() {
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      document.querySelectorAll('.desc-cell').forEach(function(td) {
+        var span = td.querySelector('.desc-text');
+        if (!span) return;
+        var text = span.textContent;
+        // 用 canvas 测量文字宽度，与 td 可视宽度比较
+        ctx.font = getComputedStyle(td).font;
+        var textW = ctx.measureText(text).width;
+        var tdW = td.getBoundingClientRect().width;
+        if (tdW > 0 && textW > tdW) {
+          span.style.cursor = 'pointer';
+          (function(t, s) {
+            s.onmouseenter = function() { showTip(s, t.getAttribute('data-desc-full') || s.textContent); };
+            s.onmouseleave = function() { hideTip(); };
+          })(td, span);
+        }
+      });
+    }
+
+    // 部门列：事件绑定在 <td> 单元格上
+    function bindDeptCells() {
+      document.querySelectorAll('.dept-cell[data-tooltip]').forEach(function(td) {
+        td.onmouseenter = function() {
+          var text = td.getAttribute('data-tooltip');
+          if (text) showTip(td, text);
+        };
+        td.onmouseleave = function() {
+          hideTip();
+        };
+      });
+    }
+
+    // 抽屉页：事件委托处理 .dept-tooltip
+    document.addEventListener('mouseenter', function(e) {
+      var dept = e.target.closest('.dept-tooltip[data-tooltip]');
+      if (dept && dept.getAttribute('data-tooltip')) {
+        showTip(dept, dept.getAttribute('data-tooltip'));
+      }
+    }, true);
+
+    document.addEventListener('mouseleave', function(e) {
+      var dept = e.target.closest('.dept-tooltip[data-tooltip]');
+      if (dept && dept === currentTarget) {
+        hideTip();
+      }
+    }, true);
+
+    // 对外暴露：渲染表格后调用
+    window.bindTooltips = function() {
+      bindDescCells();
+      bindDeptCells();
+    };
+  })();
 </script>
 
 <!-- 普通管理员配置弹窗 -->
