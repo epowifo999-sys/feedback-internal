@@ -2188,16 +2188,21 @@ table.tbl {
 .ai-report-stat-delta.delta-good { background: oklch(0.94 0.03 155); color: oklch(0.45 0.12 155); }
 .ai-report-stat-delta.delta-bad { background: oklch(0.94 0.03 25); color: oklch(0.5 0.15 25); }
 .ai-report-stat-delta.delta-neutral { background: oklch(0.95 0.005 80); color: oklch(0.55 0.008 75); }
+.ai-report-stat-delta.delta-up { background: oklch(0.94 0.04 50); color: oklch(0.48 0.14 42); }
 
-.ai-report-dist-list { margin-top: 8px; }
 .ai-report-dist-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 7px 10px;
   border-bottom: 1px solid oklch(0.96 0.008 75);
   font-size: 12px;
 }
+.ai-report-dist-label { flex: 0 0 72px; color: oklch(0.38 0.01 60); }
+.ai-report-dist-bar-wrap { flex: 1; height: 6px; background: oklch(0.94 0.006 75); border-radius: 3px; overflow: hidden; }
+.ai-report-dist-bar { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.ai-report-dist-count { flex: 0 0 28px; text-align: right; font-weight: 600; color: oklch(0.28 0.01 60); }
+.ai-report-dist-pct { flex: 0 0 42px; text-align: right; font-weight: 600; color: oklch(0.48 0.12 42); }
 .ai-report-dist-row:last-child { border-bottom: none; }
 .ai-report-dist-label { color: oklch(0.38 0.01 60); flex: 1; }
 .ai-report-dist-count { color: oklch(0.55 0.008 75); margin-right: 12px; }
@@ -3018,19 +3023,19 @@ table.tbl {
       if (overview.success) {
         // 总反馈 — 数字滚动动画
         animateNumber(document.getElementById('kpiTotal'), overview.total.value);
-        setDeltaAbs('kpiDeltaTotal', overview.total.delta);
+        setDeltaAbs('kpiDeltaTotal', overview.total.delta, 'total');
 
         // 本周新增 — 数字滚动动画
         animateNumber(document.getElementById('kpiNew'), overview.new_count.value);
-        setDeltaAbs('kpiDeltaNew', overview.new_count.delta);
+        setDeltaAbs('kpiDeltaNew', overview.new_count.delta, 'new');
 
         // 待处理 — 数字滚动动画
         animateNumber(document.getElementById('kpiPending'), overview.pending.value);
-        setDeltaAbs('kpiDeltaPending', overview.pending.delta);
+        setDeltaAbs('kpiDeltaPending', overview.pending.delta, 'pending');
 
         // 已解决 — 数字滚动动画
         animateNumber(document.getElementById('kpiResolved'), overview.resolved.value);
-        setDeltaAbs('kpiDeltaResolved', overview.resolved.delta);
+        setDeltaAbs('kpiDeltaResolved', overview.resolved.delta, 'resolved');
       }
 
       // 处理本周新增副文字 + 绘制折线图
@@ -3075,7 +3080,7 @@ table.tbl {
   }
 
   // 环比：显示绝对差值
-  function setDeltaAbs(elId, delta) {
+  function setDeltaAbs(elId, delta, type) {
     const el = document.getElementById(elId);
     if (!el) return;
     if (delta === 0) {
@@ -3088,8 +3093,26 @@ table.tbl {
     const isUp = delta > 0;
     const arrow = isUp ? '↑' : '↓';
     el.textContent = `${arrow} ${Math.abs(delta)}`;
-    el.className = `delta ${isUp ? 'up' : 'down'}`;
     el.style = '';
+    // 按语义决定颜色
+    if (type === 'pending') {
+      // 待处理：增加=坏（红），减少=好（绿）
+      el.className = `delta ${isUp ? 'down' : 'up'}`;
+    } else if (type === 'resolved') {
+      // 已解决：增加=好（绿），减少=坏（红）
+      el.className = `delta ${isUp ? 'up' : 'down'}`;
+    } else {
+      // 总反馈/本周新增：增加用橙色（关注），减少用灰色
+      if (isUp) {
+        el.className = 'delta';
+        el.style.color = 'oklch(0.48 0.14 42)';
+        el.style.background = 'oklch(0.94 0.04 50)';
+      } else {
+        el.className = 'delta';
+        el.style.color = 'var(--ink-3)';
+        el.style.background = 'oklch(0.95 0.005 80)';
+      }
+    }
   }
 
   // 加载列表
@@ -3273,7 +3296,7 @@ table.tbl {
     // 行点击打开抽屉
     tbody.querySelectorAll('tr').forEach(tr => {
       tr.addEventListener('click', e => {
-        if (e.target.closest('.ck, .status-sel, .row-actions')) return;
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('.ck, .status-sel, .row-actions')) return;
         openDrawer(parseInt(tr.dataset.id));
       });
     });
@@ -3994,7 +4017,20 @@ table.tbl {
 
       const data = await res.json();
       if (data.success) {
-        const { success, ...cardData } = data;
+        const { success, content, meta, ...rest } = data;
+        // Try to parse content string as JSON (strip markdown code block markers if present)
+        let cardData = { content, meta, ...rest };
+        if (typeof content === 'string') {
+          let raw = content.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```\s*$/, '');
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.type) {
+              cardData = { ...parsed, meta };
+            }
+          } catch (e) { /* fallback to raw content string */ }
+        } else if (typeof content === 'object' && content !== null && content.type) {
+          cardData = { ...content, meta };
+        }
         aiConversationHistory.push({ role: 'assistant', content: JSON.stringify(cardData) });
         addAiResponse(cardData);
       } else {
@@ -4259,27 +4295,35 @@ table.tbl {
         case 'stats': {
           const items = sec.items || [];
           const statsGrid = items.map(s => {
-            const dt = s.deltaType || 'up';
             const deltaVal = s.delta ?? 0;
-            const isIncrease = dt === 'up' && deltaVal >= 0 || dt === 'down' && deltaVal < 0;
-            // Determine delta color semantics
-            let deltaClass = 'delta-neutral';
+            const dt = s.deltaType || 'up';
             const label = s.label || '';
-            if (label === '待处理') {
-              // 待处理增加 = 坏（红），减少 = 好（绿）
-              deltaClass = isIncrease ? 'delta-bad' : 'delta-good';
-            } else if (label === '已解决') {
-              // 已解决增加 = 好（绿），减少 = 坏（红）
-              deltaClass = isIncrease ? 'delta-good' : 'delta-bad';
+
+            let deltaClass = 'delta-neutral';
+            let deltaHtml = '';
+
+            if (deltaVal === 0) {
+              // 无变化：显示"持平"灰色，无箭头
+              deltaHtml = `<span class="ai-report-stat-delta delta-neutral">持平</span>`;
             } else {
-              // 总反馈/本周新增 增减 = 中性（灰）
-              deltaClass = 'delta-neutral';
+              const isUp = dt === 'up' ? deltaVal > 0 : deltaVal < 0;
+              const arrow = isUp ? '↑' : '↓';
+              // 语义判断：待处理增加=坏，已解决增加=好，总反馈/新增增加=坏（值得关注）
+              if (label === '待处理') {
+                deltaClass = isUp ? 'delta-bad' : 'delta-good';
+              } else if (label === '已解决') {
+                deltaClass = isUp ? 'delta-good' : 'delta-bad';
+              } else {
+                // 总反馈/本周新增：增加用橙色提示，减少用绿色
+                deltaClass = isUp ? 'delta-up' : 'delta-good';
+              }
+              deltaHtml = `<span class="ai-report-stat-delta ${deltaClass}">${arrow}${Math.abs(deltaVal)}</span>`;
             }
-            const arrow = dt === 'up' ? '↑' : '↓';
+
             return `<div class="ai-report-stat-card">
               <div class="ai-report-stat-label">${escapeHtml(s.label)}</div>
               <div class="ai-report-stat-value">${s.value}</div>
-              ${deltaVal !== undefined && deltaVal !== null ? `<span class="ai-report-stat-delta ${deltaClass}">${arrow}${Math.abs(deltaVal)}</span>` : ''}
+              ${deltaHtml}
             </div>`;
           }).join('');
           return `<div class="ai-report-section">
@@ -4290,14 +4334,24 @@ table.tbl {
 
         case 'distribution': {
           const items = (sec.items || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
-          const rows = items.map(it => {
-            // 清理 AI 可能返回的百分号后缀，统一只加一个
+          const maxCount = items.reduce((m, it) => Math.max(m, it.count || 0), 0);
+          const colorMap = {
+            '体验建议': '#6B9668', '输出不准确': '#D4926A',
+            'BUG': '#C05F4F', '需求': '#6B8CAE', '其他': '#A89A8F'
+          };
+          const rows = items.map((it, i) => {
             const pctRaw = String(it.percent || 0).replace(/%+$/, '');
-            const pct = parseFloat(pctRaw);
+            const pct = parseFloat(pctRaw) || 0;
+            const barW = maxCount > 0 ? ((it.count / maxCount) * 100).toFixed(1) : 0;
+            const fallbackColors = ['#D4926A','#6B9668','#C05F4F','#6B8CAE','#A89A8F'];
+            const color = colorMap[it.label] || fallbackColors[i % fallbackColors.length];
             return `<div class="ai-report-dist-row">
               <span class="ai-report-dist-label">${escapeHtml(it.label)}</span>
+              <div class="ai-report-dist-bar-wrap">
+                <div class="ai-report-dist-bar" style="width:${barW}%;background:${color};"></div>
+              </div>
               <span class="ai-report-dist-count">${it.count}</span>
-              <span class="ai-report-dist-pct">${isNaN(pct) ? 0 : pct}%</span>
+              <span class="ai-report-dist-pct">${pct}%</span>
             </div>`;
           }).join('');
           return `<div class="ai-report-section">
@@ -4308,10 +4362,19 @@ table.tbl {
 
         case 'insights': {
           const items = sec.items || [];
-          const rows = items.map((it, i) => `<div class="ai-report-insight-item">
-            <span class="ai-report-insight-num">${i + 1}</span>
-            <span class="ai-report-insight-text">${escapeHtml(typeof it === 'string' ? it : (it.content || ''))}</span>
-          </div>`).join('');
+          const numColors = [
+            { bg: 'oklch(0.92 0.06 25)', color: 'oklch(0.48 0.18 25)' },  // 红 - 紧急
+            { bg: 'oklch(0.93 0.06 42)', color: 'oklch(0.50 0.15 42)' },  // 橙 - 重要
+            { bg: 'oklch(0.93 0.05 75)', color: 'oklch(0.50 0.12 75)' },  // 黄 - 关注
+            { bg: 'oklch(0.93 0.02 200)', color: 'oklch(0.50 0.08 200)' }, // 蓝 - 参考
+          ];
+          const rows = items.map((it, i) => {
+            const c = numColors[Math.min(i, numColors.length - 1)];
+            return `<div class="ai-report-insight-item">
+              <span class="ai-report-insight-num" style="background:${c.bg};color:${c.color};">${i + 1}</span>
+              <span class="ai-report-insight-text">${escapeHtml(typeof it === 'string' ? it : (it.content || ''))}</span>
+            </div>`;
+          }).join('');
           return `<div class="ai-report-section">
             <div class="ai-report-sec-title"><div class="ai-report-sec-icon">💡</div>${escapeHtml(sectionTitle)}${toggleArrow}</div>
             <div class="ai-report-sec-body"><div class="ai-report-insights">${rows}</div></div>
@@ -4603,6 +4666,7 @@ table.tbl {
 
     // 抽屉页：事件委托处理 .dept-tooltip
     document.addEventListener('mouseenter', function(e) {
+      if (!e.target || typeof e.target.closest !== 'function') return;
       var dept = e.target.closest('.dept-tooltip[data-tooltip]');
       if (dept && dept.getAttribute('data-tooltip')) {
         showTip(dept, dept.getAttribute('data-tooltip'));
@@ -4610,6 +4674,7 @@ table.tbl {
     }, true);
 
     document.addEventListener('mouseleave', function(e) {
+      if (!e.target || typeof e.target.closest !== 'function') return;
       var dept = e.target.closest('.dept-tooltip[data-tooltip]');
       if (dept && dept === currentTarget) {
         hideTip();

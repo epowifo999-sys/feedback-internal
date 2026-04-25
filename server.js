@@ -1563,12 +1563,14 @@ async function handleAiChat(req, res) {
            COUNT(*) as total,
            SUM(CASE WHEN date(created_at) >= ? THEN 1 ELSE 0 END) as this_week,
            SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? THEN 1 ELSE 0 END) as last_week,
-           SUM(CASE WHEN date(created_at) >= ? AND status = '收集中' THEN 1 ELSE 0 END) as pending,
-           SUM(CASE WHEN date(created_at) >= ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved
+           SUM(CASE WHEN date(created_at) >= ? AND status = '收集中' THEN 1 ELSE 0 END) as pending_this,
+           SUM(CASE WHEN date(created_at) >= ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved_this,
+           SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? AND status = '收集中' THEN 1 ELSE 0 END) as pending_last,
+           SUM(CASE WHEN date(created_at) >= ? AND date(created_at) < ? AND status = '已解决' THEN 1 ELSE 0 END) as resolved_last
          FROM feedback`,
-        [thisWeekStr, lastWeekStr, thisWeekStr, thisWeekStr, thisWeekStr],
+        [thisWeekStr, lastWeekStr, thisWeekStr, thisWeekStr, thisWeekStr, lastWeekStr, thisWeekStr, lastWeekStr, thisWeekStr],
         (err, row) => {
-          if (err || !row) return resolve({ total: 0, this_week: 0, last_week: 0, pending: 0, resolved: 0 });
+          if (err || !row) return resolve({ total: 0, this_week: 0, last_week: 0, pending_this: 0, resolved_this: 0, pending_last: 0, resolved_last: 0 });
           resolve(row);
         }
       );
@@ -1650,8 +1652,8 @@ async function handleAiChat(req, res) {
 ## 数据概览（本周 vs 上周）
 总反馈: ${statsContext.total}
 本周新增: ${weekStats.this_week} 条 | 上周新增: ${weekStats.last_week} 条 | 变化: ${weekStats.this_week - weekStats.last_week}
-待处理: ${weekStats.pending} 条 | 上周待处理: 未知
-已解决: ${weekStats.resolved} 条 | 上周已解决: 未知
+本周待处理: ${weekStats.pending_this} 条 | 上周待处理: ${weekStats.pending_last} 条
+本周已解决: ${weekStats.resolved_this} 条 | 上周已解决: ${weekStats.resolved_last} 条
 本周问题分类: ${JSON.stringify(thisWeekByType)}
 上周问题分类: ${JSON.stringify(lastWeekByType)}
 全部历史分类: ${JSON.stringify(statsContext.by_type)}
@@ -1689,6 +1691,9 @@ async function handleAiChat(req, res) {
 - 重点结论必须包含"问题判断 + 建议方向"
 - 下周建议必须是具体可执行的行动项
 - 标题必须使用"${weekLabel}用户反馈周报"格式，禁止使用占位符
+- delta 计算规则：delta = 本周值 - 上周值。必须用数据概览中提供的真实上周数据计算（总反馈 delta = 本周新增 - 上周新增；待处理 delta = 本周待处理 - 上周待处理；已解决 delta = 本周已解决 - 上周已解决）
+- 如果某个指标的上期数据为 0 或不存在，delta 必须设为 0，严禁用当前值或自行编造
+- deltaType 判断：delta > 0 用 "up"，delta < 0 用 "down"，delta === 0 用 "up"
 
 **对比分析约束：**
 - 生成对比结论时，若本周数据远大于上周（超过5倍），不要使用"是上周X倍"的表述，改为"较上周大幅增长，增加了X条"
