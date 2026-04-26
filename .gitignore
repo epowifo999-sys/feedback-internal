@@ -5,8 +5,9 @@ node_modules/
 *.db
 feedback.db
 
-# 忽略用户上传的测试图片目录
-data/uploads/
+# 忽略本地数据库和测试图片目录
+/data/
+/uploads/
 
 # 忽略 Mac 系统自动生成的隐藏文件
 .DS_Store

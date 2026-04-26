@@ -153,6 +153,7 @@ function initDatabase() {
       content TEXT DEFAULT '',
       images TEXT DEFAULT '[]',
       status_snapshot TEXT DEFAULT '',
+      mentioned_users TEXT DEFAULT '[]',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (feedback_id) REFERENCES feedback(id)
     )
@@ -160,6 +161,8 @@ function initDatabase() {
 
   // 为旧评论数据添加 type 字段
   db.run(`ALTER TABLE feedback_comments ADD COLUMN type TEXT DEFAULT 'comment'`, () => {});
+  // 为旧评论数据添加 mentioned_users 字段
+  db.run(`ALTER TABLE feedback_comments ADD COLUMN mentioned_users TEXT DEFAULT '[]'`, () => {});
 
   // 管理员配置表
   db.run(`
@@ -453,6 +456,33 @@ async function initTocaTokens() {
     console.log(`[${formatDate()}] toca Token 初始化完成`);
   } catch (error) {
     console.error(`[${formatDate()}] toca Token 初始化失败:`, error.message);
+  }
+}
+
+// 开发模式 SKIP_AUTH 下缓存超管真实姓名
+let skipAuthAdminName = '';
+
+async function initSkipAuthAdminName() {
+  if (process.env.SKIP_AUTH !== 'true') return;
+  try {
+    const spaceToken = await getTocaSpaceToken();
+    const resp = await request({
+      method: 'POST',
+      hostname: 'toca.17u.cn',
+      path: '/open-api/uic-apis/member/list-by-employee-nos',
+      headers: { 'Authorization': spaceToken, 'Content-Type': 'application/json' }
+    }, {
+      spaceId: CONFIG.TOCA_SPACE_ID,
+      employeeNos: [SUPER_ADMIN_EMPLOYEE_NO],
+      includeMemberDeptData: true,
+      includeCustomData: true
+    });
+    if (resp.data?.success && resp.data.data?.length > 0) {
+      skipAuthAdminName = resp.data.data[0].memberName || '';
+      console.log(`[${formatDate()}] 开发模式管理员姓名: ${skipAuthAdminName}`);
+    }
+  } catch (e) {
+    console.error(`[${formatDate()}] 获取开发模式管理员姓名失败:`, e.message);
   }
 }
 
@@ -948,7 +978,7 @@ async function refreshAdminCache() {
 // 管理后台权限检查中间件 — 返回 { session, isSuperAdmin } 或 null
 function checkAdminAuth(req, res) {
   if (process.env.SKIP_AUTH === 'true') {
-    return { session: { isAdmin: true, employeeNo: SUPER_ADMIN_EMPLOYEE_NO }, isSuperAdmin: true };
+    return { session: { isAdmin: true, employeeNo: SUPER_ADMIN_EMPLOYEE_NO, name: skipAuthAdminName || '管理员', memberName: skipAuthAdminName }, isSuperAdmin: true };
   }
   const cookie = req.headers.cookie;
   if (!cookie) return null;
@@ -1827,16 +1857,17 @@ function handleCreateComment(req, res) {
     const content = (data.content || '').trim();
     const images = data.images || [];
     const statusSnapshot = data.status_snapshot || '';
-    const userName = session.name;
+    const mentionedUsers = data.mentioned_users || [];
+    const userName = session.memberName || session.name || '';
 
     if (!content && images.length === 0) {
       return sendError(res, '备注内容不能为空', 400);
     }
 
     db.run(
-      `INSERT INTO feedback_comments (feedback_id, user_id, user_name, content, images, status_snapshot)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [feedbackId, 'admin', userName, content, JSON.stringify(images), statusSnapshot],
+      `INSERT INTO feedback_comments (feedback_id, user_id, user_name, content, images, status_snapshot, mentioned_users)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [feedbackId, 'admin', userName, content, JSON.stringify(images), statusSnapshot, JSON.stringify(mentionedUsers)],
       function(err) {
         if (err) {
           console.error(`[${formatDate()}] 写入评论失败:`, err);
@@ -1936,7 +1967,7 @@ function handleExport(req, res) {
       if (rows.length > 0) {
         const feedbackIds = rows.map(r => r.id);
         const placeholders = feedbackIds.map(() => '?').join(',');
-        const commentSql = `SELECT feedback_id, user_name, created_at, content, type FROM feedback_comments WHERE feedback_id IN (${placeholders}) ORDER BY created_at ASC`;
+        const commentSql = `SELECT feedback_id, user_name, created_at, content, type, mentioned_users FROM feedback_comments WHERE feedback_id IN (${placeholders}) ORDER BY created_at ASC`;
         const comments = await new Promise((resolve, reject) => {
           db.all(commentSql, feedbackIds, (e, result) => {
             if (e) reject(e);
@@ -2114,7 +2145,7 @@ function handleUpdateStatus(req, res) {
             db.run(
               `INSERT INTO feedback_comments (feedback_id, user_id, user_name, type, content, status_snapshot)
                VALUES (?, ?, ?, 'status_change', '', ?)`,
-              [id, 'admin', session.name, JSON.stringify({ from: oldStatus, to: status })],
+              [id, 'admin', session.memberName || session.name || '', JSON.stringify({ from: oldStatus, to: status })],
               (err) => {
                 if (err) {
                   console.error(`[${formatDate()}] 记录状态变更失败:`, err);
@@ -2325,6 +2356,9 @@ server.listen(CONFIG.PORT, async () => {
 
   // 初始化 toca Token
   await initTocaTokens();
+
+  // 开发模式下获取超管真实姓名
+  await initSkipAuthAdminName();
 });
 
 // 优雅退出
